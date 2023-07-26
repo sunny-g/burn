@@ -3,7 +3,7 @@ use burn_tensor::Bool;
 
 use crate::{
     self as burn,
-    nn::{attention::MHAAutoregressiveCache, cache::TensorCache},
+    nn::{attention::MhaCache, cache::TensorCache},
 };
 
 use super::{PositionWiseFeedForward, PositionWiseFeedForwardConfig};
@@ -151,6 +151,7 @@ impl<B: Backend> TransformerEncoder<B> {
     }
 }
 
+/// Transformer encoder layer module.
 #[derive(Module, Debug)]
 pub struct TransformerEncoderLayer<B: Backend> {
     mha: MultiHeadAttention<B>,
@@ -263,9 +264,7 @@ impl<B: Backend> TransformerEncoderLayer<B> {
             input_mhs = input_mhs.mask_attn(mask_attn);
         }
 
-        let x_1 = self
-            .mha
-            .forward_autoregressive_inference(input_mhs, &mut cache.mha);
+        let x_1 = self.mha.forward_cache(input_mhs, &mut cache.mha);
         let x_1 = self.dropout.forward(x_1.context) + input;
         let x_1 = cache
             .norm_1
@@ -286,17 +285,21 @@ impl<B: Backend> TransformerEncoderLayer<B> {
     }
 }
 
-#[derive(Default)]
 struct TransformerEncoderLayerAutoregressiveCache<B: Backend> {
-    mha: MHAAutoregressiveCache<B>,
+    mha: MhaCache<B>,
     pwff: TensorCache<B, 3>,
     norm_1: TensorCache<B, 3>,
     norm_2: TensorCache<B, 3>,
 }
 
 impl<B: Backend> TransformerEncoderLayerAutoregressiveCache<B> {
-    fn new() -> Self {
-        Self::default()
+    fn empty() -> Self {
+        Self {
+            mha: MhaCache::autoregressive(),
+            pwff: TensorCache::empty(),
+            norm_1: TensorCache::empty(),
+            norm_2: TensorCache::empty(),
+        }
     }
 }
 
@@ -311,7 +314,7 @@ impl<B: Backend> TransformerEncoderAutoregressiveCache<B> {
     fn empty(num_layers: usize) -> Self {
         Self {
             layers: (0..num_layers)
-                .map(|_| TransformerEncoderLayerAutoregressiveCache::new())
+                .map(|_| TransformerEncoderLayerAutoregressiveCache::empty())
                 .collect(),
         }
     }
@@ -346,7 +349,7 @@ mod tests {
 
         let tensor = Tensor::<TestBackend, 3>::random(
             [batch_size, seq_length, d_model],
-            Distribution::Standard,
+            Distribution::Default,
         );
         let mask_attn = generate_autoregressive_mask(batch_size, seq_length, &tensor.device());
         let input = TransformerEncoderInput::new(tensor.clone()).mask_attn(mask_attn);
@@ -356,11 +359,11 @@ mod tests {
         let mut cache = transformer.new_autoregressive_cache();
 
         for i in 1..seq_length + 1 {
-            let tensor = tensor.clone().index([0..batch_size, 0..i, 0..d_model]);
+            let tensor = tensor.clone().slice([0..batch_size, 0..i, 0..d_model]);
             let input = TransformerEncoderInput::new(tensor.clone());
             let next_tok = transformer
                 .forward_autoregressive_inference(input, &mut cache)
-                .index([0..batch_size, i - 1..i, 0..d_model]);
+                .slice([0..batch_size, i - 1..i, 0..d_model]);
             output_2.push(next_tok);
         }
 

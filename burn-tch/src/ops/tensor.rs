@@ -14,9 +14,11 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
         device: &TchDevice,
     ) -> TchTensor<E, D> {
         match distribution {
-            Distribution::Standard => {
+            Distribution::Default => {
                 let mut tensor = TchTensor::<E, D>::empty(shape, *device);
-                tensor.mut_ops(|tensor| tensor.normal_(0.0, 1.0)).unwrap()
+                tensor
+                    .mut_ops(|tensor| tensor.rand_like_out(tensor))
+                    .unwrap()
             }
             Distribution::Bernoulli(prob) => {
                 let mut tensor = TchTensor::<E, D>::empty(shape, *device);
@@ -39,7 +41,10 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
 
     fn arange(range: Range<usize>, device: &TchDevice) -> TchTensor<i64, 1> {
         let device: tch::Device = (*device).into();
-        let mut tensor = tch::Tensor::arange(range.end as i64, (tch::Kind::Int64, device));
+        let mut tensor = tch::Tensor::arange(
+            range.end as i64 - range.start as i64,
+            (tch::Kind::Int64, device),
+        );
 
         if range.start != 0 {
             tensor = tensor.f_add_scalar_(range.start as i64).unwrap();
@@ -48,18 +53,26 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
         TchTensor::new(tensor)
     }
 
+    fn repeat<const D: usize>(
+        tensor: TchTensor<E, D>,
+        dim: usize,
+        times: usize,
+    ) -> TchTensor<E, D> {
+        TchOps::repeat(tensor, dim, times)
+    }
+
     fn zeros<const D: usize>(shape: Shape<D>, device: &TchDevice) -> TchTensor<E, D> {
         let shape = TchShape::from(shape);
         let device: tch::Device = (*device).into();
 
-        TchTensor::new(tch::Tensor::zeros(&shape.dims, (E::KIND, device)))
+        TchTensor::new(tch::Tensor::zeros(shape.dims, (E::KIND, device)))
     }
 
     fn ones<const D: usize>(shape: Shape<D>, device: &TchDevice) -> TchTensor<E, D> {
         let shape = TchShape::from(shape);
         let device: tch::Device = (*device).into();
 
-        TchTensor::new(tch::Tensor::ones(&shape.dims, (E::KIND, device)))
+        TchTensor::new(tch::Tensor::ones(shape.dims, (E::KIND, device)))
     }
 
     fn shape<const D: usize>(tensor: &<TchBackend<E> as Backend>::TensorPrimitive<D>) -> Shape<D> {
@@ -69,15 +82,17 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
     fn to_data<const D: usize>(
         tensor: &<TchBackend<E> as Backend>::TensorPrimitive<D>,
     ) -> Data<<TchBackend<E> as Backend>::FloatElem, D> {
-        let values: Vec<E> = tensor.tensor.shallow_clone().into();
-        Data::new(values, tensor.shape())
+        let shape = Self::shape(tensor);
+        let tensor = Self::reshape(tensor.clone(), Shape::new([shape.num_elements()]));
+        let values: Result<Vec<E>, tch::TchError> = tensor.tensor.shallow_clone().try_into();
+
+        Data::new(values.unwrap(), shape)
     }
 
     fn into_data<const D: usize>(
         tensor: <TchBackend<E> as Backend>::TensorPrimitive<D>,
     ) -> Data<<TchBackend<E> as Backend>::FloatElem, D> {
-        let shape = tensor.shape();
-        Data::new(tensor.tensor.into(), shape)
+        Self::to_data(&tensor)
     }
 
     fn device<const D: usize>(tensor: &TchTensor<E, D>) -> TchDevice {
@@ -92,7 +107,7 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
         shape: Shape<D>,
         device: &<TchBackend<E> as Backend>::Device,
     ) -> <TchBackend<E> as Backend>::TensorPrimitive<D> {
-        let tensor = tch::Tensor::empty(&shape.dims.map(|a| a as i64), (E::KIND, (*device).into()));
+        let tensor = tch::Tensor::empty(shape.dims.map(|a| a as i64), (E::KIND, (*device).into()));
 
         TchTensor::new(tensor)
     }
@@ -174,65 +189,63 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
         TchOps::reshape(tensor, shape)
     }
 
-    fn index_select<const D: usize>(
+    fn gather<const D: usize>(
+        dim: usize,
         tensor: TchTensor<E, D>,
-        indexes: TchTensor<i64, D>,
+        indices: TchTensor<i64, D>,
     ) -> TchTensor<E, D> {
-        TchOps::index_select(tensor, indexes)
+        TchOps::gather(dim, tensor, indices)
     }
 
-    fn index_select_assign<const D: usize>(
+    fn scatter<const D: usize>(
+        dim: usize,
         tensor: TchTensor<E, D>,
-        indexes: TchTensor<i64, D>,
+        indices: TchTensor<i64, D>,
         value: TchTensor<E, D>,
     ) -> TchTensor<E, D> {
-        TchOps::index_select_assign(tensor, indexes, value)
+        TchOps::scatter(dim, tensor, indices, value)
     }
 
-    fn index_select_dim<const D: usize>(
+    fn select<const D: usize>(
         tensor: TchTensor<E, D>,
         dim: usize,
-        indexes: TchTensor<i64, 1>,
+        indices: TchTensor<i64, 1>,
     ) -> TchTensor<E, D> {
-        TchOps::index_select_dim(tensor, dim, indexes)
+        TchOps::index_select_dim(tensor, dim, indices)
     }
 
-    fn index_select_dim_assign<const D1: usize, const D2: usize>(
-        tensor: TchTensor<E, D1>,
+    fn select_assign<const D: usize>(
+        tensor: TchTensor<E, D>,
         dim: usize,
-        indexes: TchTensor<i64, 1>,
-        value: TchTensor<E, D2>,
-    ) -> TchTensor<E, D1> {
-        TchOps::index_select_dim_assign(tensor, dim, indexes, value)
+        indices: TchTensor<i64, 1>,
+        value: TchTensor<E, D>,
+    ) -> TchTensor<E, D> {
+        TchOps::select_assign(tensor, dim, indices, value)
     }
 
-    fn index<const D1: usize, const D2: usize>(
+    fn slice<const D1: usize, const D2: usize>(
         tensor: TchTensor<E, D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
     ) -> TchTensor<E, D1> {
-        TchOps::index(tensor, indexes)
+        TchOps::slice(tensor, ranges)
     }
 
-    fn index_assign<const D1: usize, const D2: usize>(
+    fn slice_assign<const D1: usize, const D2: usize>(
         tensor: TchTensor<E, D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
         value: TchTensor<E, D1>,
     ) -> <TchBackend<E> as Backend>::TensorPrimitive<D1> {
-        TchOps::index_assign(tensor, indexes, value)
+        TchOps::slice_assign(tensor, ranges, value)
     }
 
-    fn mask_scatter<const D: usize>(
+    fn mask_where<const D: usize>(
         tensor: TchTensor<E, D>,
         mask: TchTensor<bool, D>,
-        source: TchTensor<E, D>,
+        value: TchTensor<E, D>,
     ) -> TchTensor<E, D> {
-        TchTensor::binary_ops_tensor(
-            tensor,
-            source,
-            |tensor, source| tensor.f_masked_scatter_(&mask.tensor, source).unwrap(),
-            |tensor, source| tensor.f_masked_scatter(&mask.tensor, source).unwrap(),
-            |tensor, source| tensor.f_masked_scatter(&mask.tensor, source).unwrap(),
-        )
+        let output = value.tensor.where_self(&mask.tensor, &tensor.tensor);
+
+        TchTensor::new(output)
     }
 
     fn mask_fill<const D: usize>(
@@ -329,17 +342,33 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
     }
 
     fn argmax<const D: usize>(tensor: TchTensor<E, D>, dim: usize) -> TchTensor<i64, D> {
-        let storage = tensor.storage.clone();
-        let tensor = tensor.tensor.argmax(dim as i64, true);
-
-        TchTensor::from_existing(tensor, storage)
+        TchOps::argmax(tensor, dim)
     }
 
     fn argmin<const D: usize>(tensor: TchTensor<E, D>, dim: usize) -> TchTensor<i64, D> {
-        let storage = tensor.storage.clone();
-        let tensor = tensor.tensor.argmin(dim as i64, true);
+        TchOps::argmin(tensor, dim)
+    }
 
-        TchTensor::from_existing(tensor, storage)
+    fn max_dim<const D: usize>(tensor: TchTensor<E, D>, dim: usize) -> TchTensor<E, D> {
+        TchOps::max_dim(tensor, dim)
+    }
+
+    fn max_dim_with_indices<const D: usize>(
+        tensor: TchTensor<E, D>,
+        dim: usize,
+    ) -> (TchTensor<E, D>, TchTensor<i64, D>) {
+        TchOps::max_dim_with_indices(tensor, dim)
+    }
+
+    fn min_dim<const D: usize>(tensor: TchTensor<E, D>, dim: usize) -> TchTensor<E, D> {
+        TchOps::min_dim(tensor, dim)
+    }
+
+    fn min_dim_with_indices<const D: usize>(
+        tensor: TchTensor<E, D>,
+        dim: usize,
+    ) -> (TchTensor<E, D>, TchTensor<i64, D>) {
+        TchOps::min_dim_with_indices(tensor, dim)
     }
 
     fn exp<const D: usize>(tensor: TchTensor<E, D>) -> TchTensor<E, D> {
@@ -383,9 +412,5 @@ impl<E: TchElement> TensorOps<TchBackend<E>> for TchBackend<E> {
 
     fn cat<const D: usize>(tensors: Vec<TchTensor<E, D>>, dim: usize) -> TchTensor<E, D> {
         TchOps::cat(tensors, dim)
-    }
-
-    fn relu<const D: usize>(tensor: TchTensor<E, D>) -> TchTensor<E, D> {
-        tensor.unary_ops(|mut tensor| tensor.relu_(), |tensor| tensor.relu())
     }
 }

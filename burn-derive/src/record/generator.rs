@@ -31,6 +31,7 @@ impl RecordGenerator {
             let name = &field.field.ident;
 
             fields.extend(quote! {
+                /// The #name field.
                 pub #name: <#ty as burn::record::Record>::Item<S>,
             });
             bounds.extend(quote!{
@@ -42,6 +43,8 @@ impl RecordGenerator {
         let bound = bounds.to_string();
 
         quote! {
+
+            /// The record item type for the module.
             #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
             #[serde(bound = #bound)]
             pub struct #name #generics {
@@ -72,15 +75,15 @@ impl RecordGenerator {
 
         quote! {
             impl #impl_generics burn::record::Record for #name #ty_generics #where_clause {
-                type Item<S: burn::record::RecordSettings> = #name_item #ty_generics_item;
+                type Item<S: burn::record::PrecisionSettings> = #name_item #ty_generics_item;
 
-                fn into_item<S: burn::record::RecordSettings>(self) -> Self::Item<S> {
+                fn into_item<S: burn::record::PrecisionSettings>(self) -> Self::Item<S> {
                     #name_item {
                         #body_into_item
                     }
                 }
 
-                fn from_item<S: burn::record::RecordSettings>(item: Self::Item<S>) -> Self {
+                fn from_item<S: burn::record::PrecisionSettings>(item: Self::Item<S>) -> Self {
                     Self {
                         #body_from_item
                     }
@@ -94,7 +97,7 @@ impl RecordGenerator {
     }
 
     pub fn record_item_generics(&self) -> Generics {
-        let param: syn::Generics = parse_quote! { <S: burn::record::RecordSettings >};
+        let param: syn::Generics = parse_quote! { <S: burn::record::PrecisionSettings >};
         let mut generics = self.generics.clone();
         for param in param.params.into_iter() {
             generics.params.push(param);

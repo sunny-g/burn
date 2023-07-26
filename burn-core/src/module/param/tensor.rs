@@ -37,9 +37,7 @@ impl<const D: usize, B: Backend> Module<B> for Param<Tensor<B, D>> {
         }
 
         // Make sure we load the record with the same autodiff setting.
-        if self.is_require_grad() {
-            tensor = tensor.require_grad();
-        }
+        tensor = tensor.set_require_grad(self.is_require_grad());
 
         Self::new(record.id, tensor)
     }
@@ -58,33 +56,49 @@ impl<const D: usize, B: ADBackend> ADModule<B> for Param<Tensor<B, D>> {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use super::*;
     use crate::{
-        record::{NoStdInferenceRecordSettings, Record},
+        module::Module,
+        nn::LinearConfig,
+        record::{BinBytesRecorder, FullPrecisionSettings, Recorder},
         TestADBackend,
     };
-
-    use super::*;
 
     #[test]
     fn test_load_record_setting() {
         let tensor = Tensor::<TestADBackend, 2>::ones([3, 3]);
-        let bytes = Param::from(tensor.clone())
-            .into_record()
-            .record::<NoStdInferenceRecordSettings>(())
+
+        let byte_recorder = BinBytesRecorder::<FullPrecisionSettings>::default();
+        let bytes = byte_recorder
+            .record(Param::from(tensor.clone()).into_record(), ())
             .unwrap();
 
         let no_grad_is_require_grad = Param::from(tensor.clone())
             .no_grad()
-            .load_record(Param::load::<NoStdInferenceRecordSettings>(bytes.clone()).unwrap())
+            .load_record(byte_recorder.load(bytes.clone()).unwrap())
             .value
             .is_require_grad();
 
         let with_default_is_require_grad = Param::from(tensor)
-            .load_record(Param::load::<NoStdInferenceRecordSettings>(bytes).unwrap())
+            .load_record(byte_recorder.load(bytes).unwrap())
             .value
             .is_require_grad();
 
         assert!(!no_grad_is_require_grad);
         assert!(with_default_is_require_grad);
+    }
+
+    #[test]
+    fn test_init_with_record_setting() {
+        let config = LinearConfig::new(32, 32);
+        let module_init = config.init::<TestADBackend>();
+
+        let record = module_init.clone().into_record();
+        let module_init_with = config.init_with::<TestADBackend>(record);
+
+        assert_eq!(
+            module_init.weight.is_require_grad(),
+            module_init_with.weight.is_require_grad()
+        );
     }
 }

@@ -1,6 +1,5 @@
 // Language
 use alloc::vec::Vec;
-use core::cmp::Ordering;
 use core::ops::Range;
 
 // Current crate
@@ -18,6 +17,7 @@ use burn_tensor::{backend::Backend, ops::TensorOps, Data, ElementConversion, Sha
 use libm::{cos, erf, sin, tanh};
 
 #[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
 use num_traits::Float;
 
 impl<E: FloatNdArrayElement> TensorOps<NdArrayBackend<E>> for NdArrayBackend<E> {
@@ -151,59 +151,61 @@ impl<E: FloatNdArrayElement> TensorOps<NdArrayBackend<E>> for NdArrayBackend<E> 
         NdArrayOps::reshape(tensor, shape)
     }
 
-    fn index_select<const D: usize>(
+    fn gather<const D: usize>(
+        dim: usize,
         tensor: NdArrayTensor<E, D>,
-        indexes: NdArrayTensor<i64, D>,
+        indices: NdArrayTensor<i64, D>,
     ) -> NdArrayTensor<E, D> {
-        NdArrayMathOps::index_select(tensor, indexes)
+        NdArrayMathOps::gather(dim, tensor, indices)
     }
 
-    fn index_select_assign<const D: usize>(
+    fn scatter<const D: usize>(
+        dim: usize,
         tensor: NdArrayTensor<E, D>,
-        indexes: NdArrayTensor<i64, D>,
+        indices: NdArrayTensor<i64, D>,
         value: NdArrayTensor<E, D>,
     ) -> NdArrayTensor<E, D> {
-        NdArrayMathOps::index_select_assign(tensor, indexes, value)
+        NdArrayMathOps::scatter(dim, tensor, indices, value)
     }
 
-    fn index_select_dim<const D: usize>(
+    fn select<const D: usize>(
         tensor: NdArrayTensor<E, D>,
         dim: usize,
-        indexes: NdArrayTensor<i64, 1>,
+        indices: NdArrayTensor<i64, 1>,
     ) -> NdArrayTensor<E, D> {
-        NdArrayMathOps::index_select_dim(tensor, dim, indexes)
+        NdArrayMathOps::select(tensor, dim, indices)
     }
 
-    fn index_select_dim_assign<const D1: usize, const D2: usize>(
-        tensor: NdArrayTensor<E, D1>,
+    fn select_assign<const D: usize>(
+        tensor: NdArrayTensor<E, D>,
         dim: usize,
-        indexes: NdArrayTensor<i64, 1>,
-        value: NdArrayTensor<E, D2>,
-    ) -> NdArrayTensor<E, D1> {
-        NdArrayMathOps::index_select_dim_assign(tensor, dim, indexes, value)
+        indices: NdArrayTensor<i64, 1>,
+        value: NdArrayTensor<E, D>,
+    ) -> NdArrayTensor<E, D> {
+        NdArrayMathOps::select_assign(tensor, dim, indices, value)
     }
 
-    fn index<const D1: usize, const D2: usize>(
+    fn slice<const D1: usize, const D2: usize>(
         tensor: NdArrayTensor<E, D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
     ) -> NdArrayTensor<E, D1> {
-        NdArrayOps::index(tensor, indexes)
+        NdArrayOps::slice(tensor, ranges)
     }
 
-    fn index_assign<const D1: usize, const D2: usize>(
+    fn slice_assign<const D1: usize, const D2: usize>(
         tensor: NdArrayTensor<E, D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
         value: NdArrayTensor<E, D1>,
     ) -> NdArrayTensor<E, D1> {
-        NdArrayOps::index_assign(tensor, indexes, value)
+        NdArrayOps::slice_assign(tensor, ranges, value)
     }
 
-    fn mask_scatter<const D: usize>(
+    fn mask_where<const D: usize>(
         tensor: NdArrayTensor<E, D>,
         mask: NdArrayTensor<bool, D>,
-        source: NdArrayTensor<E, D>,
+        value: NdArrayTensor<E, D>,
     ) -> NdArrayTensor<E, D> {
-        NdArrayMathOps::mask_scatter(tensor, mask, source)
+        NdArrayMathOps::mask_where(tensor, mask, value)
     }
 
     fn mask_fill<const D: usize>(
@@ -338,11 +340,11 @@ impl<E: FloatNdArrayElement> TensorOps<NdArrayBackend<E>> for NdArrayBackend<E> 
     }
 
     fn argmax<const D: usize>(tensor: NdArrayTensor<E, D>, dim: usize) -> NdArrayTensor<i64, D> {
-        arg(tensor, dim, cmp_min)
+        NdArrayMathOps::argmax(tensor, dim)
     }
 
     fn argmin<const D: usize>(tensor: NdArrayTensor<E, D>, dim: usize) -> NdArrayTensor<i64, D> {
-        arg(tensor, dim, cmp_max)
+        NdArrayMathOps::argmin(tensor, dim)
     }
 
     fn exp<const D: usize>(tensor: NdArrayTensor<E, D>) -> NdArrayTensor<E, D> {
@@ -426,75 +428,4 @@ impl<E: FloatNdArrayElement> TensorOps<NdArrayBackend<E>> for NdArrayBackend<E> 
     fn cat<const D: usize>(tensors: Vec<NdArrayTensor<E, D>>, dim: usize) -> NdArrayTensor<E, D> {
         NdArrayOps::cat(tensors, dim)
     }
-
-    fn relu<const D: usize>(tensor: NdArrayTensor<E, D>) -> NdArrayTensor<E, D> {
-        let zero = 0.elem();
-        let array = tensor
-            .array
-            .mapv_into(|elem| match elem < zero {
-                true => 0.0.elem(),
-                false => elem,
-            })
-            .into_shared();
-
-        NdArrayTensor::new(array)
-    }
-}
-
-fn arg<E: FloatNdArrayElement, F, const D: usize>(
-    tensor: NdArrayTensor<E, D>,
-    dim: usize,
-    cmp: F,
-) -> NdArrayTensor<i64, D>
-where
-    F: Fn(&f64, &f64) -> Ordering,
-{
-    let batch_size = tensor.shape().dims[dim];
-
-    let mut data = NdArrayBackend::into_data::<D>(tensor.clone());
-    let mut start = 0;
-    let mut end = tensor.shape().dims[dim];
-    let mut output = Vec::new();
-
-    while end <= data.value.len() {
-        let data_dim = &mut data.value[start..end];
-        let mut sorted: Vec<f64> = data_dim.iter().map(|a| a.elem()).collect();
-        sorted.sort_by(&cmp);
-
-        let max = sorted[0];
-
-        let data_dim = &mut data.value[start..end];
-        let mut index: i64 = 0;
-        for elem in data_dim {
-            let as_float: f64 = elem.elem();
-            if as_float == max {
-                break;
-            }
-            index += 1;
-        }
-        output.push(index);
-        start += batch_size;
-        end += batch_size;
-    }
-    let mut shape = tensor.shape();
-    shape.dims[dim] = 1;
-    NdArrayTensor::from_data(Data::new(output, shape))
-}
-
-fn cmp_max(a: &f64, b: &f64) -> Ordering {
-    if a < b {
-        return Ordering::Less;
-    } else if a > b {
-        return Ordering::Greater;
-    }
-    Ordering::Equal
-}
-
-fn cmp_min(a: &f64, b: &f64) -> Ordering {
-    if a > b {
-        return Ordering::Less;
-    } else if a < b {
-        return Ordering::Greater;
-    }
-    Ordering::Equal
 }

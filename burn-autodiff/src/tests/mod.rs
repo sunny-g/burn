@@ -1,6 +1,11 @@
+#![allow(missing_docs)]
+
 mod add;
 mod aggregation;
+mod avgpool1d;
+mod avgpool2d;
 mod backward;
+mod broadcast;
 mod cat;
 mod complex;
 mod conv1d;
@@ -10,13 +15,13 @@ mod cross_entropy;
 mod div;
 mod erf;
 mod exp;
-mod index;
-mod index_select;
-mod index_select_dim;
+mod gather_scatter;
+mod gelu;
 mod log;
 mod log1p;
 mod mask;
 mod matmul;
+mod maxmin;
 mod maxpool2d;
 mod mul;
 mod multithread;
@@ -24,7 +29,9 @@ mod neg;
 mod pow;
 mod relu;
 mod reshape;
+mod select;
 mod sin;
+mod slice;
 mod softmax;
 mod sqrt;
 mod sub;
@@ -37,10 +44,19 @@ macro_rules! testgen_all {
         type TestADBackend = burn_autodiff::ADBackendDecorator<TestBackend>;
         type TestADTensor<const D: usize, K> = burn_tensor::Tensor<TestADBackend, D, K>;
 
+        // Behavior
+        burn_autodiff::testgen_ad_broadcast!();
+
+        // Activation
+        burn_autodiff::testgen_ad_relu!();
+        burn_autodiff::testgen_ad_gelu!();
+
         // Modules
         burn_autodiff::testgen_ad_conv1d!();
         burn_autodiff::testgen_ad_conv2d!();
         burn_autodiff::testgen_ad_max_pool2d!();
+        burn_autodiff::testgen_ad_avg_pool1d!();
+        burn_autodiff::testgen_ad_avg_pool2d!();
         burn_autodiff::testgen_module_backward!();
 
         // Tensor
@@ -48,15 +64,16 @@ macro_rules! testgen_all {
         burn_autodiff::testgen_ad_multithread!();
         burn_autodiff::testgen_ad_add!();
         burn_autodiff::testgen_ad_aggregation!();
+        burn_autodiff::testgen_ad_maxmin!();
         burn_autodiff::testgen_ad_cat!();
         burn_autodiff::testgen_ad_cos!();
         burn_autodiff::testgen_ad_cross_entropy_loss!();
         burn_autodiff::testgen_ad_div!();
         burn_autodiff::testgen_ad_erf!();
         burn_autodiff::testgen_ad_exp!();
-        burn_autodiff::testgen_ad_index!();
-        burn_autodiff::testgen_ad_index_select!();
-        burn_autodiff::testgen_ad_index_select_dim!();
+        burn_autodiff::testgen_ad_slice!();
+        burn_autodiff::testgen_ad_gather_scatter!();
+        burn_autodiff::testgen_ad_select!();
         burn_autodiff::testgen_ad_log!();
         burn_autodiff::testgen_ad_log1p!();
         burn_autodiff::testgen_ad_mask!();
@@ -64,7 +81,6 @@ macro_rules! testgen_all {
         burn_autodiff::testgen_ad_mul!();
         burn_autodiff::testgen_ad_neg!();
         burn_autodiff::testgen_ad_powf!();
-        burn_autodiff::testgen_ad_relu!();
         burn_autodiff::testgen_ad_reshape!();
         burn_autodiff::testgen_ad_sin!();
         burn_autodiff::testgen_ad_softmax!();

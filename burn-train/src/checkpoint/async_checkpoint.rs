@@ -26,6 +26,7 @@ impl<R: Record> CheckpointerThread<R> {
     }
 }
 
+/// Async checkpointer.
 pub struct AsyncCheckpointer<E> {
     checkpointer: Arc<dyn Checkpointer<E> + Send + Sync>,
     sender: mpsc::SyncSender<Message<E>>,
@@ -33,6 +34,15 @@ pub struct AsyncCheckpointer<E> {
 }
 
 impl<R: Record + 'static> AsyncCheckpointer<R> {
+    /// Create a new async checkpointer.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpointer` - The checkpointer.
+    ///
+    /// # Returns
+    ///
+    /// The async checkpointer.
     pub fn new(checkpointer: Arc<dyn Checkpointer<R> + Send + Sync>) -> Self {
         // Only on checkpoint can be done in advance.
         let (sender, receiver) = mpsc::sync_channel(0);
@@ -65,7 +75,7 @@ where
 impl<E> Drop for AsyncCheckpointer<E> {
     fn drop(&mut self) {
         self.sender.send(Message::End).unwrap();
-        let handler = std::mem::replace(&mut self.handler, None);
+        let handler = self.handler.take();
 
         if let Some(handler) = handler {
             handler.join().unwrap();

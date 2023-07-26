@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt::Write};
 
 static MAX_REFRESH_RATE_MILLIS: u128 = 250;
 
+/// The CLI dashboard renderer.
 pub struct CLIDashboardRenderer {
     pb_epoch: ProgressBar,
     pb_iteration: ProgressBar,
@@ -94,6 +95,7 @@ impl DashboardRenderer for CLIDashboardRenderer {
 }
 
 impl CLIDashboardRenderer {
+    /// Create a new CLI dashboard renderer.
     pub fn new() -> Self {
         let pb = MultiProgress::new();
         let pb_epoch = ProgressBar::new(0);
@@ -185,7 +187,7 @@ impl CLIDashboardRenderer {
     fn register_template_progress(&self, progress: &str, template: String) -> String {
         let mut template = template;
 
-        let bar = "[{wide_bar:.cyan/blue}] ({eta})";
+        let bar = "[{wide_bar:.cyan/blue}]";
         template += format!("  - {progress} {bar}").as_str();
         template
     }
@@ -232,12 +234,13 @@ impl CLIDashboardRenderer {
             .set_length(self.progress.progress.items_total as u64);
 
         self.pb_epoch.set_style(style_epoch.progress_chars("#>-"));
-        self.pb_epoch.set_position(self.progress.epoch as u64);
+        self.pb_epoch.set_position(self.progress.epoch as u64 - 1);
         self.pb_epoch.set_length(self.progress.epoch_total as u64);
 
         self.last_update = std::time::Instant::now();
     }
 
+    /// Registers a new metric to be displayed.
     pub fn register_key_item(
         &self,
         key: &'static str,

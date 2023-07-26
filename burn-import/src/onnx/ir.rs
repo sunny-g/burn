@@ -1,5 +1,7 @@
+use burn_ndarray::NdArrayBackend;
+use core::fmt;
 use half::f16;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Formatter};
 use strum_macros::{Display, EnumString};
 
 pub type Shape = Vec<usize>;
@@ -7,12 +9,19 @@ pub type Shape = Vec<usize>;
 #[derive(Debug, Clone)]
 pub struct Argument {
     pub name: String,
-    pub arg_type: Option<ArgType>,
+    pub ty: ArgType,
 }
 
 #[derive(Debug, Clone)]
 pub enum ArgType {
-    Tensor(Tensor),
+    Tensor(TensorArg),
+    Shape(usize),
+    Constant,
+}
+
+#[derive(new, Default, Debug, Clone)]
+pub struct TensorArg {
+    pub dim: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -41,34 +50,59 @@ pub enum ElementType {
     Int64,
     String,
     Float16,
+    Bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct Tensor {
-    pub name: Option<String>,
     pub elem_type: ElementType,
-    pub shape: Shape,
+    pub dim: usize,
     pub data: Option<TensorData>,
+    pub shape: Option<Shape>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum TensorData {
-    Float16s(Vec<f16>),
-    Float32s(Vec<f32>),
-    Float64s(Vec<f64>),
-    Int32s(Vec<i32>),
-    Int64s(Vec<i64>),
-    Strings(Vec<String>),
+    Float16(Vec<f16>),
+    Float32(Vec<f32>),
+    Float64(Vec<f64>),
+    Int32(Vec<i32>),
+    Int64(Vec<i64>),
+    String(Vec<String>),
+    Bool(Vec<bool>),
+}
+
+/// ONNX graph representation
+#[derive(Debug, Clone)]
+pub struct ONNXGraph {
+    /// The nodes of the graph.
+    pub nodes: Vec<Node>,
+
+    /// The inputs of the graph.
+    pub inputs: Vec<Argument>,
+
+    /// The outputs of the graph.
+    pub outputs: Vec<Argument>,
+
+    /// The states of the graph.
+    pub states: Vec<State>,
+
+    /// The original node names.
+    pub old_node_names: HashMap<String, String>,
+
+    /// The original input names.
+    pub old_input_names: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Graph {
-    pub nodes: Vec<Node>,
-    pub inputs: Vec<Argument>,
-    pub outputs: Vec<Argument>,
-    pub initializers: Vec<Argument>,
-    pub old_node_names: HashMap<String, String>,
-    pub old_input_names: HashMap<String, String>,
+pub struct State {
+    pub name: String,
+    pub ty: StateType,
+}
+
+#[derive(Debug, Clone)]
+pub enum StateType {
+    Tensor(Tensor),
 }
 
 #[derive(Debug, Clone)]
@@ -77,9 +111,8 @@ pub struct Node {
     pub name: String,
     pub inputs: Vec<Argument>,
     pub outputs: Vec<Argument>,
-    pub initializers: Vec<Argument>,
+    pub states: Vec<State>,
     pub attrs: Attributes,
-    pub is_stateful: bool,
 }
 
 // Required by topological sort
@@ -208,6 +241,8 @@ pub enum NodeType {
     MatMulInteger,
     Max,
     MaxPool,
+    MaxPool1d,
+    MaxPool2d,
     MaxRoiPool,
     MaxUnpool,
     Mean,
@@ -302,4 +337,53 @@ pub enum NodeType {
     Upsample,
     Where,
     Xor,
+}
+
+/// Truncate the vector display for debug display
+fn trunc<T: fmt::Display>(v: &Vec<T>) -> String {
+    const BEGIN_INDEX: usize = 0;
+    const MAX_LEN: usize = 5;
+    let mut s = String::new();
+    s.push('[');
+    for (i, item) in v.iter().enumerate() {
+        if i > BEGIN_INDEX {
+            s.push_str(", ");
+        }
+        s.push_str(&format!("{}", item));
+        if i > MAX_LEN {
+            s.push_str(", ...");
+            break;
+        }
+    }
+    s.push(']');
+    s
+}
+
+/// Shorten the tensor data for debug display
+impl fmt::Debug for TensorData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TensorData::Float16(v) => write!(f, "Float16({})", trunc(v)),
+            TensorData::Float32(v) => write!(f, "Float32({})", trunc(v)),
+            TensorData::Float64(v) => write!(f, "Float64({})", trunc(v)),
+            TensorData::Int32(v) => write!(f, "Int32({})", trunc(v)),
+            TensorData::Int64(v) => write!(f, "Int64({})", trunc(v)),
+            TensorData::String(v) => write!(f, "String({})", trunc(v)),
+            TensorData::Bool(v) => write!(f, "Bool({})", trunc(v)),
+        }
+    }
+}
+
+/// Convert itermediate representation of tensor into a burn tensor
+impl<const D: usize> TryFrom<&Tensor> for burn::tensor::Tensor<NdArrayBackend<f32>, D> {
+    type Error = ();
+
+    fn try_from(value: &Tensor) -> Result<Self, Self::Error> {
+        let shape: [usize; D] = value.shape.clone().unwrap().try_into().unwrap();
+        let TensorData::Float32(floats) = value.data.clone().unwrap() else {
+            todo!("Tensor data must be float32s");
+        };
+
+        Ok(burn::tensor::Tensor::from_data(floats.as_slice()).reshape(shape))
+    }
 }

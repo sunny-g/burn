@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 /// want a probability distribution that is computed lazily.
 pub struct ShuffledDataset<D, I> {
     dataset: D,
-    indexes: Vec<usize>,
+    indices: Vec<usize>,
     input: PhantomData<I>,
 }
 
@@ -14,20 +14,22 @@ impl<D, I> ShuffledDataset<D, I>
 where
     D: Dataset<I>,
 {
+    /// Creates a new shuffled dataset.
     pub fn new(dataset: D, rng: &mut StdRng) -> Self {
-        let mut indexes = Vec::with_capacity(dataset.len());
+        let mut indices = Vec::with_capacity(dataset.len());
         for i in 0..dataset.len() {
-            indexes.push(i);
+            indices.push(i);
         }
-        indexes.shuffle(rng);
+        indices.shuffle(rng);
 
         Self {
             dataset,
-            indexes,
-            input: PhantomData::default(),
+            indices,
+            input: PhantomData,
         }
     }
 
+    /// Creates a new shuffled dataset with a fixed seed.
     pub fn with_seed(dataset: D, seed: u64) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
         Self::new(dataset, &mut rng)
@@ -40,7 +42,7 @@ where
     I: Clone + Send + Sync,
 {
     fn get(&self, index: usize) -> Option<I> {
-        let index = match self.indexes.get(index) {
+        let index = match self.indices.get(index) {
             Some(index) => index,
             None => return None,
         };

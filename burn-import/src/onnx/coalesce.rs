@@ -1,4 +1,9 @@
-use super::ir::{AttributeValue, Node, NodeType};
+use burn::tensor::Tensor;
+use burn_ndarray::NdArrayBackend;
+
+use super::ir::{AttributeValue, Node, NodeType, StateType, TensorData};
+
+type B = NdArrayBackend<f32>;
 
 /// The function transforms the graph into a new one where the nodes are coalesced into a single node.
 pub fn coalesce(nodes: &mut Vec<Node>) {
@@ -16,7 +21,7 @@ pub fn coalesce(nodes: &mut Vec<Node>) {
 ///  It only supports the case where the Gemm node is a straight linear transformation.
 fn convert_gemm(node: &mut Node) {
     if node.inputs.len() != 1 {
-        panic!("Gemm node must have 3 inputs");
+        panic!("Gemm node must have 1 input");
     }
 
     if node.outputs.len() != 1 {
@@ -37,11 +42,31 @@ fn convert_gemm(node: &mut Node) {
 
     if straight_linear {
         node.node_type = NodeType::Linear;
-        node.is_stateful = true;
         node.attrs.remove("alpha");
         node.attrs.remove("beta");
         node.attrs.remove("transB");
+
+        // Transpose the weights
+        transpose_linear_node_weights(node);
     } else {
         panic!("Full Gemm node not supported yet.");
     }
+}
+
+// Transpose linear weights (required for Gemm -> Linear conversion)
+fn transpose_linear_node_weights(node: &mut Node) {
+    if node.states.is_empty() {
+        panic!("Linear node must have at least 1 state.");
+    }
+
+    let StateType::Tensor(node_weight) = &node.states[0].ty;
+
+    let weight: Tensor<B, 2> = node_weight.try_into().unwrap();
+
+    let weight = weight.transpose();
+
+    let StateType::Tensor(node_weight) = &mut node.states[0].ty;
+
+    node_weight.data = Some(TensorData::Float32(weight.clone().into_data().value));
+    node_weight.shape = Some(weight.shape().dims.to_vec());
 }

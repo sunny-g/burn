@@ -5,11 +5,11 @@ use crate::{
 };
 
 /// Applies the [embedding module](crate::ops::ModuleOps::embedding).
-pub fn embedding<B>(weights: Tensor<B, 2>, indexes: Tensor<B, 2, Int>) -> Tensor<B, 3>
+pub fn embedding<B>(weights: Tensor<B, 2>, indices: Tensor<B, 2, Int>) -> Tensor<B, 3>
 where
     B: Backend,
 {
-    Tensor::new(B::embedding(weights.primitive, indexes.primitive))
+    Tensor::new(B::embedding(weights.primitive, indices.primitive))
 }
 
 /// Applies a [1D convolution](crate::ops::ModuleOps::conv2d).
@@ -97,8 +97,34 @@ where
     Tensor::new(B::max_pool2d(x.primitive, kernel_size, stride, padding))
 }
 
-/// Applies a [2D max pooling with indexes](crate::ops::ModuleOps::max_pool2d_with_indexes).
-pub fn max_pool2d_with_indexes<B>(
+/// Applies a [2D avg pooling](crate::ops::ModuleOps::avg_pool2d).
+pub fn avg_pool2d<B>(
+    x: Tensor<B, 4>,
+    kernel_size: [usize; 2],
+    stride: [usize; 2],
+    padding: [usize; 2],
+) -> Tensor<B, 4>
+where
+    B: Backend,
+{
+    Tensor::new(B::avg_pool2d(x.primitive, kernel_size, stride, padding))
+}
+
+/// Applies a [1D avg pooling](crate::ops::ModuleOps::avg_pool1d).
+pub fn avg_pool1d<B>(
+    x: Tensor<B, 3>,
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+) -> Tensor<B, 3>
+where
+    B: Backend,
+{
+    Tensor::new(B::avg_pool1d(x.primitive, kernel_size, stride, padding))
+}
+
+/// Applies a [2D max pooling with indices](crate::ops::ModuleOps::max_pool2d_with_indices).
+pub fn max_pool2d_with_indices<B>(
     x: Tensor<B, 4>,
     kernel_size: [usize; 2],
     stride: [usize; 2],
@@ -107,7 +133,7 @@ pub fn max_pool2d_with_indexes<B>(
 where
     B: Backend,
 {
-    let output = B::max_pool2d_with_indexes(x.primitive, kernel_size, stride, padding);
+    let output = B::max_pool2d_with_indices(x.primitive, kernel_size, stride, padding);
 
-    (Tensor::new(output.output), Tensor::new(output.indexes))
+    (Tensor::new(output.output), Tensor::new(output.indices))
 }

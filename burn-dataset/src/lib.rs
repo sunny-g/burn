@@ -1,13 +1,27 @@
+#![warn(missing_docs)]
+
+//! # Burn Dataset
+//!
+//! Burn Dataset is a library for creating and loading datasets.
+
 #[macro_use]
 extern crate derive_new;
 
 extern crate dirs;
 
+/// Sources for datasets.
 pub mod source;
+
+/// Transformations to be used with datasets.
 pub mod transform;
+
+/// Audio datasets.
+#[cfg(feature = "audio")]
+pub mod audio;
 
 mod dataset;
 pub use dataset::*;
+pub use source::huggingface::downloader::*;
 
 #[cfg(test)]
 mod test_data {

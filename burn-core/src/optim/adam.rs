@@ -1,4 +1,7 @@
-use crate::{self as burn, module::ADModule, record::Record, LearningRate};
+use crate::{
+    self as burn, grad_clipping::GradientClippingConfig, module::ADModule, record::Record,
+    LearningRate,
+};
 
 use super::{
     decay::{WeightDecay, WeightDecayConfig, WeightDecayState},
@@ -9,6 +12,7 @@ use crate::optim::adaptor::OptimizerAdaptor;
 use crate::tensor::{backend::ADBackend, Tensor};
 use burn_tensor::{backend::Backend, ElementConversion};
 
+/// Adam configuration.
 #[derive(Config)]
 pub struct AdamConfig {
     /// Parameter for Adam.
@@ -21,7 +25,9 @@ pub struct AdamConfig {
     #[config(default = 1e-5)]
     epsilon: f32,
     /// [Weight decay](WeightDecayConfig) config.
-    pub weight_decay: Option<WeightDecayConfig>,
+    weight_decay: Option<WeightDecayConfig>,
+    /// [Gradient Clipping](GradientClippingConfig) config.
+    grad_clipping: Option<GradientClippingConfig>,
 }
 
 /// Adam optimizer as described in the paper [Adam: A Method for Stochastic Optimization](https://arxiv.org/pdf/1412.6980.pdf).
@@ -30,6 +36,7 @@ pub struct Adam<B: Backend> {
     weight_decay: Option<WeightDecay<B>>,
 }
 
+/// Adam state.
 #[derive(Record, Clone, new)]
 pub struct AdamState<B: Backend, const D: usize> {
     weight_decay: Option<WeightDecayState<B, D>>,
@@ -79,6 +86,11 @@ impl<B: Backend> SimpleOptimizer<B> for Adam<B> {
 }
 
 impl AdamConfig {
+    /// Initialize Adam optimizer.
+    ///
+    /// # Returns
+    ///
+    /// Returns an optimizer that can be used to optimize a module.
     pub fn init<B: ADBackend, M: ADModule<B>>(&self) -> impl Optimizer<M, B> {
         let optim = Adam {
             momentum: AdaptiveMomentum {
@@ -88,10 +100,16 @@ impl AdamConfig {
             },
             weight_decay: self.weight_decay.as_ref().map(WeightDecay::new),
         };
-        OptimizerAdaptor::from(optim)
+
+        let mut optim = OptimizerAdaptor::from(optim);
+        if let Some(config) = &self.grad_clipping {
+            optim = optim.with_grad_clipping(config.init());
+        }
+        optim
     }
 }
 
+/// Adaptive momentum state.
 #[derive(Record, new, Clone)]
 pub struct AdaptiveMomentumState<B: Backend, const D: usize> {
     time: usize,
@@ -154,6 +172,15 @@ impl AdaptiveMomentum {
 }
 
 impl<B: Backend, const D: usize> AdaptiveMomentumState<B, D> {
+    /// Move state to device.
+    ///
+    /// # Arguments
+    ///
+    /// * `device` - Device to move state to.
+    ///
+    /// # Returns
+    ///
+    /// Returns state moved to device.
     pub fn to_device(mut self, device: &B::Device) -> Self {
         self.moment_1 = self.moment_1.to_device(device);
         self.moment_2 = self.moment_2.to_device(device);
@@ -166,7 +193,7 @@ mod tests {
     use super::*;
     use crate::module::{Module, Param};
     use crate::optim::{GradientsParams, Optimizer};
-    use crate::record::DebugRecordSettings;
+    use crate::record::{BinFileRecorder, FullPrecisionSettings, Recorder};
     use crate::tensor::{Data, Distribution, Tensor};
     use crate::{nn, TestADBackend, TestBackend};
 
@@ -175,14 +202,13 @@ mod tests {
     #[test]
     fn test_adam_optimizer_save_load_state() {
         let linear = nn::LinearConfig::new(6, 6).init();
-        let x = Tensor::<TestADBackend, 2>::random([2, 6], Distribution::Standard);
+        let x = Tensor::<TestADBackend, 2>::random([2, 6], Distribution::Default);
         let mut optimizer = create_adam();
         let grads = linear.forward(x).backward();
         let grads = GradientsParams::from_grads(grads, &linear);
         let _linear = optimizer.step(LEARNING_RATE, linear, grads);
-        optimizer
-            .to_record()
-            .record::<DebugRecordSettings>("/tmp/test_optim".into())
+        BinFileRecorder::<FullPrecisionSettings>::default()
+            .record(optimizer.to_record(), "/tmp/test_optim".into())
             .unwrap();
 
         let state_optim_before = optimizer.to_record();

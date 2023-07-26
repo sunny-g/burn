@@ -1,3 +1,5 @@
+mod avgpool1d;
+mod avgpool2d;
 mod conv1d;
 mod conv2d;
 mod conv_transpose1d;

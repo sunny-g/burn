@@ -15,6 +15,7 @@ pub struct GradientsParams {
 }
 
 impl GradientsParams {
+    /// Creates a new [GradientsParams](GradientsParams).
     pub fn new() -> Self {
         Self::default()
     }
@@ -116,6 +117,6 @@ mod tests {
     }
 
     fn random_tensor() -> Tensor<TestADBackend, 2> {
-        Tensor::<TestADBackend, 2>::random([2, 20], Distribution::Standard)
+        Tensor::<TestADBackend, 2>::random([2, 20], Distribution::Default)
     }
 }

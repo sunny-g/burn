@@ -18,14 +18,24 @@ impl<E: TchElement> BoolTensorOps<TchBackend<E>> for TchBackend<E> {
         tensor.shape()
     }
 
+    fn bool_repeat<const D: usize>(
+        tensor: TchTensor<bool, D>,
+        dim: usize,
+        times: usize,
+    ) -> TchTensor<bool, D> {
+        TchOps::repeat(tensor, dim, times)
+    }
+
     fn bool_to_data<const D: usize>(tensor: &TchTensor<bool, D>) -> Data<bool, D> {
-        let values: Vec<bool> = tensor.tensor.shallow_clone().into();
-        Data::new(values, tensor.shape())
+        let shape = Self::bool_shape(tensor);
+        let tensor = Self::bool_reshape(tensor.clone(), Shape::new([shape.num_elements()]));
+        let values: Result<Vec<bool>, tch::TchError> = tensor.tensor.shallow_clone().try_into();
+
+        Data::new(values.unwrap(), shape)
     }
 
     fn bool_into_data<const D: usize>(tensor: TchTensor<bool, D>) -> Data<bool, D> {
-        let shape = tensor.shape();
-        Data::new(tensor.tensor.into(), shape)
+        Self::bool_to_data(&tensor)
     }
 
     fn bool_to_device<const D: usize>(
@@ -51,25 +61,25 @@ impl<E: TchElement> BoolTensorOps<TchBackend<E>> for TchBackend<E> {
         device: &<TchBackend<E> as Backend>::Device,
     ) -> TchTensor<bool, D> {
         let tensor = tch::Tensor::empty(
-            &shape.dims.map(|a| a as i64),
+            shape.dims.map(|a| a as i64),
             (tch::Kind::Bool, (*device).into()),
         );
 
         TchTensor::new(tensor)
     }
 
-    fn bool_index<const D1: usize, const D2: usize>(
+    fn bool_slice<const D1: usize, const D2: usize>(
         tensor: TchTensor<bool, D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
     ) -> TchTensor<bool, D1> {
-        TchOps::index(tensor, indexes)
+        TchOps::slice(tensor, ranges)
     }
-    fn bool_index_assign<const D1: usize, const D2: usize>(
+    fn bool_slice_assign<const D1: usize, const D2: usize>(
         tensor: TchTensor<bool, D1>,
-        indexes: [std::ops::Range<usize>; D2],
+        ranges: [std::ops::Range<usize>; D2],
         value: TchTensor<bool, D1>,
     ) -> TchTensor<bool, D1> {
-        TchOps::index_assign(tensor, indexes, value)
+        TchOps::slice_assign(tensor, ranges, value)
     }
 
     fn bool_cat<const D: usize>(

@@ -9,18 +9,28 @@ use burn_tensor::backend::Backend;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use burn_tch::TchDevice;
 ///
 /// let device_gpu_1 = TchDevice::Cuda(0); // First GPU
 /// let device_gpu_2 = TchDevice::Cuda(1); // Second GPU
 /// let device_cpu = TchDevice::Cpu; // CPU
 /// let device_mps = TchDevice::Mps; // Metal Performance Shaders
+/// let device_vulkan = TchDevice::Vulkan; // Vulkan
 /// ```
 pub enum TchDevice {
+    /// CPU device.
     Cpu,
+
+    /// Cuda device with the given index. The index is the index of the Cuda device in the list of
+    /// all Cuda devices found on the system.
     Cuda(usize),
+
+    /// Metal Performance Shaders device.
     Mps,
+
+    /// Vulkan device.
+    Vulkan,
 }
 
 impl From<TchDevice> for tch::Device {
@@ -29,6 +39,7 @@ impl From<TchDevice> for tch::Device {
             TchDevice::Cpu => tch::Device::Cpu,
             TchDevice::Cuda(num) => tch::Device::Cuda(num),
             TchDevice::Mps => tch::Device::Mps,
+            TchDevice::Vulkan => tch::Device::Vulkan,
         }
     }
 }
@@ -39,6 +50,7 @@ impl From<tch::Device> for TchDevice {
             tch::Device::Cpu => TchDevice::Cpu,
             tch::Device::Cuda(num) => TchDevice::Cuda(num),
             tch::Device::Mps => TchDevice::Mps,
+            tch::Device::Vulkan => TchDevice::Vulkan,
         }
     }
 }
@@ -49,6 +61,7 @@ impl Default for TchDevice {
     }
 }
 
+/// The Tch backend.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct TchBackend<E> {
     _e: E,

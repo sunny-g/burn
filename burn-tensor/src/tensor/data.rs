@@ -1,31 +1,47 @@
 use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::{tensor::Shape, Element, ElementConversion};
 
-use libm::{pow, round};
 use rand::{distributions::Standard, Rng, RngCore};
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+/// Data structure for serializing and deserializing tensor data.
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, new)]
 pub struct DataSerialize<E> {
+    /// The values of the tensor.
     pub value: Vec<E>,
+    /// The shape of the tensor.
     pub shape: Vec<usize>,
 }
 
+/// Data structure for tensors.
 #[derive(new, Debug, Clone, PartialEq, Eq)]
 pub struct Data<E, const D: usize> {
+    /// The values of the tensor.
     pub value: Vec<E>,
+
+    /// The shape of the tensor.
     pub shape: Shape<D>,
 }
 
+/// Distribution for random value of a tensor.
 #[derive(Clone, Copy)]
 pub enum Distribution<E> {
-    Standard,
+    /// Uniform distribution from 0 (inclusive) to 1 (exclusive).
+    Default,
+
+    /// Bernoulli distribution with the given probability.
     Bernoulli(f64),
+
+    /// Uniform distribution. The range is inclusive.
     Uniform(E, E),
+
+    /// Normal distribution with the given mean and standard deviation.
     Normal(f64, f64),
 }
 
+/// Distribution sampler for random value of a tensor.
 #[derive(new)]
 pub struct DistributionSampler<'a, E, R>
 where
@@ -37,14 +53,22 @@ where
     rng: &'a mut R,
 }
 
+/// Distribution sampler kind for random value of a tensor.
 pub enum DistributionSamplerKind<E>
 where
     Standard: rand::distributions::Distribution<E>,
     E: rand::distributions::uniform::SampleUniform,
 {
+    /// Standard distribution.
     Standard(rand::distributions::Standard),
+
+    /// Uniform distribution.
     Uniform(rand::distributions::Uniform<E>),
+
+    /// Bernoulli distribution.
     Bernoulli(rand::distributions::Bernoulli),
+
+    /// Normal distribution.
     Normal(rand_distr::Normal<f64>),
 }
 
@@ -55,6 +79,7 @@ where
     E: Element,
     R: RngCore,
 {
+    /// Sames a random value from the distribution.
     pub fn sample(&mut self) -> E {
         match &self.kind {
             DistributionSamplerKind::Standard(distribution) => self.rng.sample(distribution),
@@ -76,9 +101,18 @@ where
     Standard: rand::distributions::Distribution<E>,
     E: rand::distributions::uniform::SampleUniform,
 {
+    /// Creates a new distribution sampler.
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - The random number generator.
+    ///
+    /// # Returns
+    ///
+    /// The distribution sampler.
     pub fn sampler<R: RngCore>(self, rng: &'_ mut R) -> DistributionSampler<'_, E, R> {
         let kind = match self {
-            Distribution::Standard => {
+            Distribution::Default => {
                 DistributionSamplerKind::Standard(rand::distributions::Standard {})
             }
             Distribution::Uniform(low, high) => {
@@ -100,9 +134,14 @@ impl<E> Distribution<E>
 where
     E: Element,
 {
+    /// Converts the distribution to a different element type.
+    ///
+    /// # Returns
+    ///
+    /// The converted distribution.
     pub fn convert<EOther: Element>(self) -> Distribution<EOther> {
         match self {
-            Distribution::Standard => Distribution::Standard,
+            Distribution::Default => Distribution::Default,
             Distribution::Uniform(a, b) => {
                 Distribution::Uniform(EOther::from_elem(a), EOther::from_elem(b))
             }
@@ -113,6 +152,7 @@ where
 }
 
 impl<const D: usize, E: Element> Data<E, D> {
+    /// Converts the data to a different element type.
     pub fn convert<EOther: Element>(self) -> Data<EOther, D> {
         let value: Vec<EOther> = self.value.into_iter().map(|a| a.elem()).collect();
 
@@ -121,9 +161,32 @@ impl<const D: usize, E: Element> Data<E, D> {
             shape: self.shape,
         }
     }
+
+    /// Asserts each value is within a given range.
+    ///
+    /// # Arguments
+    ///
+    /// * `range` - The range.
+    ///
+    /// # Panics
+    ///
+    /// If any value is not within the half-open range bounded inclusively below
+    /// and exclusively above (`start..end`).
+    pub fn assert_within_range<EOther: Element>(&self, range: core::ops::Range<EOther>) {
+        let start = range.start.elem::<f32>();
+        let end = range.end.elem::<f32>();
+
+        for elem in self.value.iter() {
+            let elem = elem.elem::<f32>();
+            if elem < start || elem >= end {
+                panic!("Element ({elem:?}) is not within range {range:?}");
+            }
+        }
+    }
 }
 
 impl<E: Element> DataSerialize<E> {
+    /// Converts the data to a different element type.
     pub fn convert<EOther: Element>(self) -> DataSerialize<EOther> {
         let value: Vec<EOther> = self.value.into_iter().map(|a| a.elem()).collect();
 
@@ -135,6 +198,7 @@ impl<E: Element> DataSerialize<E> {
 }
 
 impl<const D: usize> Data<bool, D> {
+    /// Converts the data to a different element type.
     pub fn convert<E: Element>(self) -> Data<E, D> {
         let value: Vec<E> = self.value.into_iter().map(|a| (a as i64).elem()).collect();
 
@@ -144,7 +208,9 @@ impl<const D: usize> Data<bool, D> {
         }
     }
 }
+
 impl<E: Element, const D: usize> Data<E, D> {
+    /// Populates the data with random values.
     pub fn random<R: RngCore>(shape: Shape<D>, distribution: Distribution<E>, rng: &mut R) -> Self {
         let num_elements = shape.num_elements();
         let mut data = Vec::with_capacity(num_elements);
@@ -156,10 +222,12 @@ impl<E: Element, const D: usize> Data<E, D> {
         Data::new(data, shape)
     }
 }
+
 impl<E: core::fmt::Debug, const D: usize> Data<E, D>
 where
     E: Element,
 {
+    /// Populates the data with zeros.
     pub fn zeros<S: Into<Shape<D>>>(shape: S) -> Data<E, D> {
         let shape = shape.into();
         let num_elements = shape.num_elements();
@@ -171,15 +239,13 @@ where
 
         Data::new(data, shape)
     }
-    pub fn zeros_(shape: Shape<D>, _kind: E) -> Data<E, D> {
-        Self::zeros(shape)
-    }
 }
 
 impl<E: core::fmt::Debug, const D: usize> Data<E, D>
 where
     E: Element,
 {
+    /// Populates the data with ones.
     pub fn ones(shape: Shape<D>) -> Data<E, D> {
         let num_elements = shape.num_elements();
         let mut data = Vec::with_capacity(num_elements);
@@ -190,12 +256,30 @@ where
 
         Data::new(data, shape)
     }
-    pub fn ones_(shape: Shape<D>, _kind: E) -> Data<E, D> {
-        Self::ones(shape)
+}
+
+impl<E: core::fmt::Debug, const D: usize> Data<E, D>
+where
+    E: Element,
+{
+    /// Populates the data with the given value
+    pub fn full(shape: Shape<D>, fill_value: E) -> Data<E, D> {
+        let num_elements = shape.num_elements();
+        let mut data = Vec::with_capacity(num_elements);
+        for _ in 0..num_elements {
+            data.push(fill_value)
+        }
+
+        Data::new(data, shape)
     }
 }
 
 impl<E: core::fmt::Debug + Copy, const D: usize> Data<E, D> {
+    /// Serializes the data.
+    ///
+    /// # Returns
+    ///
+    /// The serialized data.
     pub fn serialize(&self) -> DataSerialize<E> {
         DataSerialize {
             value: self.value.clone(),
@@ -205,10 +289,25 @@ impl<E: core::fmt::Debug + Copy, const D: usize> Data<E, D> {
 }
 
 impl<E: Into<f64> + Clone + core::fmt::Debug + PartialEq, const D: usize> Data<E, D> {
+    /// Asserts the data is approximately equal to another data.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The other data.
+    /// * `precision` - The precision of the comparison.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the data is not approximately equal.
     pub fn assert_approx_eq(&self, other: &Self, precision: usize) {
-        assert_eq!(self.shape, other.shape);
-
-        let mut eq = true;
+        let mut message = String::new();
+        if self.shape != other.shape {
+            message += format!(
+                "\n  => Shape is different: {:?} != {:?}",
+                self.shape.dims, other.shape.dims
+            )
+            .as_str();
+        }
 
         let iter = self
             .value
@@ -216,37 +315,40 @@ impl<E: Into<f64> + Clone + core::fmt::Debug + PartialEq, const D: usize> Data<E
             .into_iter()
             .zip(other.value.clone().into_iter());
 
-        for (a, b) in iter {
+        let mut num_diff = 0;
+        let max_num_diff = 5;
+
+        for (i, (a, b)) in iter.enumerate() {
             let a: f64 = a.into();
             let b: f64 = b.into();
-            let a = round(pow(10.0_f64, precision as f64) * a);
-            let b = round(pow(10.0_f64, precision as f64) * b);
 
-            if a != b {
-                eq = false;
+            let err = libm::sqrt(libm::pow(a - b, 2.0));
+            let tolerance = libm::pow(0.1, precision as f64);
+
+            if err > tolerance {
+                // Only print the first 5 differents values.
+                if num_diff < max_num_diff {
+                    message += format!(
+                        "\n  => Position {i}: {a} != {b} | difference {err} > tolerance {tolerance}"
+                    )
+                    .as_str();
+                }
+                num_diff += 1;
             }
         }
 
-        if !eq {
-            assert_eq!(self.value, other.value);
+        if num_diff >= max_num_diff {
+            message += format!("\n{} more errors...", num_diff - 5).as_str();
         }
-    }
 
-    pub fn assert_in_range(&self, min: E, max: E) {
-        let min: f64 = min.into();
-        let max: f64 = max.into();
-
-        for item in self.value.iter() {
-            let item: f64 = item.clone().into();
-
-            if item < min || item > max {
-                panic!("Element ({item}) is not within the range of ({min},{max})");
-            }
+        if !message.is_empty() {
+            panic!("Tensors are not approx eq:{}", message);
         }
     }
 }
 
 impl<const D: usize> Data<usize, D> {
+    /// Converts the usize data to a different element type.
     pub fn from_usize<O: num_traits::FromPrimitive>(self) -> Data<O, D> {
         let value: Vec<O> = self
             .value
@@ -371,7 +473,7 @@ mod tests {
         let shape = Shape::new([3, 5, 6]);
         let num_elements = shape.num_elements();
         let data =
-            Data::<f32, 3>::random(shape, Distribution::Standard, &mut StdRng::from_entropy());
+            Data::<f32, 3>::random(shape, Distribution::Default, &mut StdRng::from_entropy());
 
         assert_eq!(num_elements, data.value.len());
     }
@@ -386,5 +488,31 @@ mod tests {
 
         let data = Data::from([3.0, 5.0, 6.0]);
         assert_eq!(data.shape, Shape::new([3]));
+    }
+
+    #[test]
+    fn should_assert_appox_eq_limit() {
+        let data1 = Data::<f32, 2>::from([[3.0, 5.0, 6.0]]);
+        let data2 = Data::<f32, 2>::from([[3.01, 5.0, 6.0]]);
+
+        data1.assert_approx_eq(&data2, 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn should_assert_appox_eq_above_limit() {
+        let data1 = Data::<f32, 2>::from([[3.0, 5.0, 6.0]]);
+        let data2 = Data::<f32, 2>::from([[3.011, 5.0, 6.0]]);
+
+        data1.assert_approx_eq(&data2, 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn should_assert_appox_eq_check_shape() {
+        let data1 = Data::<f32, 2>::from([[3.0, 5.0, 6.0, 7.0]]);
+        let data2 = Data::<f32, 2>::from([[3.0, 5.0, 6.0]]);
+
+        data1.assert_approx_eq(&data2, 2);
     }
 }

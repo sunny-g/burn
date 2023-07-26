@@ -8,6 +8,7 @@ use crate::{
     backend::Backend, check, check::TensorCheck, Bool, Data, Float, Int, Shape, TensorKind,
 };
 
+/// A tensor with a given backend, shape and data type.
 #[derive(new, Clone, Debug)]
 pub struct Tensor<B, const D: usize, K = Float>
 where
@@ -22,6 +23,16 @@ where
     B: Backend,
     K: BasicOps<B>,
 {
+    /// Converts the tensor into a primitive tensor.
+    pub fn into_primitive(self) -> K::Primitive<D> {
+        self.primitive
+    }
+
+    /// Converts from a primitive tensor into a tensor.
+    pub fn from_primitive(tensor: K::Primitive<D>) -> Self {
+        Self::new(tensor)
+    }
+
     /// Create an empty tensor of the given shape.
     pub fn empty<S: Into<Shape<D>>>(shape: S) -> Self {
         Self::empty_device(shape, &B::Device::default())
@@ -110,6 +121,50 @@ where
         Tensor::new(K::reshape::<D, D2>(self.primitive, new_dims.into()))
     }
 
+    /// Squeeze the tensor along the given dimension, removing the specified dimension
+    /// of size one, and effectively reducing the rank of the tensor by one.
+    ///
+    /// # Arguments
+    ///
+    /// - `dim`: The dimension to be squeezed.
+    ///
+    /// # Type Parameters
+    ///
+    ///  - 'D2': The resulting number of dimensions in the squeezed tensor.
+    ///
+    /// # Returns
+    ///
+    /// A new `Tensor<B, D2, K>` instance with the specified dimenension removed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    ///
+    /// use burn_tensor::backend::Backend;
+    /// use burn_tensor::{Tensor, Shape};
+    ///
+    /// fn example<B: Backend>() {
+    ///     let tensor = Tensor::<B, 3>::ones(Shape::new([2, 1, 4]));
+    ///
+    ///     // Given a 3D tensor with dimensions (2, 1, 4), squeeze the dimension 1
+    ///     let squeezed_tensor: Tensor::<B, 2> = tensor.squeeze(1);
+    ///
+    ///     // Resulting tensor will have dimensions (2, 4)
+    ///     println!("{:?}", squeezed_tensor.shape());
+    /// }
+    /// ```
+    pub fn squeeze<const D2: usize>(self, dim: usize) -> Tensor<B, D2, K> {
+        check!(TensorCheck::squeeze::<D2>(dim, &self.shape().dims));
+
+        let current_dims = self.shape().dims;
+        let mut new_dims: [usize; D2] = [0; D2];
+
+        new_dims[..dim].copy_from_slice(&current_dims[..dim]);
+        new_dims[dim..].copy_from_slice(&current_dims[dim + 1..]);
+
+        Tensor::new(K::reshape::<D, D2>(self.primitive, new_dims.into()))
+    }
+
     /// Unsqueeze the current tensor. Create new dimensions to fit the given size.
     ///
     /// # Panics
@@ -156,18 +211,18 @@ where
     ///
     /// fn example<B: Backend>() {
     ///     let tensor = Tensor::<B, 3>::ones(Shape::new([2, 3, 3]));
-    ///     let tensor_indexed = tensor.index([0..1, 0..3, 1..2]);
-    ///     println!("{:?}", tensor_indexed.shape());
-    ///     // Shape { dims: [1, 3, 2] }
+    ///     let tensor_slices = tensor.slice([0..1, 0..3, 1..2]);
+    ///     println!("{:?}", tensor_slices.dims()); // [1, 3, 2]
+    ///     
     /// }
     /// ```
-    pub fn index<const D2: usize>(self, indexes: [core::ops::Range<usize>; D2]) -> Self {
-        check!(TensorCheck::index(&self.shape(), &indexes));
-        Self::new(K::index(self.primitive, indexes))
+    pub fn slice<const D2: usize>(self, ranges: [core::ops::Range<usize>; D2]) -> Self {
+        check!(TensorCheck::slice(&self.shape(), &ranges));
+        Self::new(K::slice(self.primitive, ranges))
     }
 
     /// Returns a copy of the current tensor with the selected elements changed to the new ones at
-    /// the selected indexes.
+    /// the selected indices.
     ///
     /// # Panics
     ///
@@ -183,22 +238,21 @@ where
     /// fn example<B: Backend>() {
     ///     let tensor = Tensor::<B, 3>::ones([2, 3, 3]);
     ///     let values = Tensor::<B, 3>::zeros([1, 1, 1]);
-    ///     let tensor_indexed = tensor.index_assign([0..1, 0..1, 0..1], values);
-    ///     println!("{:?}", tensor_indexed.shape());
-    ///     // Shape { dims: [2, 3, 3] }
+    ///     let tensor_sliced = tensor.slice_assign([0..1, 0..1, 0..1], values);
+    ///     println!("{:?}", tensor_sliced.dims()); // [2, 3, 3]
     /// }
     /// ```
-    pub fn index_assign<const D2: usize>(
+    pub fn slice_assign<const D2: usize>(
         self,
-        indexes: [core::ops::Range<usize>; D2],
+        ranges: [core::ops::Range<usize>; D2],
         values: Self,
     ) -> Self {
-        check!(TensorCheck::index_assign(
+        check!(TensorCheck::slice_assign(
             &self.shape(),
             &values.shape(),
-            &indexes
+            &ranges
         ));
-        Self::new(K::index_assign(self.primitive, indexes, values.primitive))
+        Self::new(K::slice_assign(self.primitive, ranges, values.primitive))
     }
 
     /// Returns the device of the current tensor.
@@ -256,12 +310,6 @@ where
         K::equal(self.primitive, other.primitive)
     }
 
-    /// Applies element wise equal comparison and returns a boolean tensor.
-    pub fn equal_elem<E: Into<K::Elem>>(self, other: E) -> Tensor<B, D, Bool> {
-        let elem: K::Elem = other.into();
-        K::equal_elem::<D>(self.primitive, elem)
-    }
-
     /// Concatenates all tensors into a new one along the given dimension.
     ///
     /// # Panics
@@ -309,7 +357,7 @@ where
                 multi_index[depth] = i;
                 let range: [core::ops::Range<usize>; D] =
                     core::array::from_fn(|i| multi_index[i]..multi_index[i] + 1);
-                let elem = &self.clone().index(range).to_data().value[0];
+                let elem = &self.clone().slice(range).to_data().value[0];
                 acc.push_str(&format!("{elem:?}"));
             }
         } else {
@@ -357,50 +405,309 @@ where
     }
 }
 
+/// Transpose marker (zero-size type). Used to sugar the transpose of a tensor, e.g.
+/// ```rust
+/// use burn_tensor::backend::Backend;
+/// use burn_tensor::{Tensor, T};
+///
+/// fn example<B: Backend>() {
+///     let tensor = Tensor::<B, 2>::from_floats([[1.0, 2.0], [3.0, 4.0]]);
+///     let transposed = tensor^T;
+/// }
+/// ```
+pub struct T;
+
+impl<B: Backend, const D: usize> core::ops::BitXor<T> for Tensor<B, D> {
+    type Output = Self;
+    fn bitxor(self, _: T) -> Self::Output {
+        self.transpose()
+    }
+}
+
 /// Trait that list all operations that can be applied on all tensors.
 ///
 /// # Warnings
 ///
 /// This is an internal trait, use the public API provided by [tensor struct](Tensor).
 pub trait BasicOps<B: Backend>: TensorKind<B> {
+    /// The type of the tensor elements.
     type Elem: 'static;
 
+    /// Creates an empty tensor with the given shape.
+    ///
+    /// # Arguments
+    ///
+    /// * `shape` - The shape of the tensor.
+    /// * `device` - The device on which the tensor will be allocated.
+    ///
+    /// # Returns
+    ///
+    /// The empty tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For creating empty tensors, users should prefer the [Tensor::empty](Tensor::empty) function,
+    /// which is more high-level and designed for public use.
     fn empty<const D: usize>(shape: Shape<D>, device: &B::Device) -> Self::Primitive<D>;
+
+    /// Returns the shape of the tensor.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    ///
+    /// # Returns
+    ///
+    /// The shape of the tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For getting the shape of a tensor, users should prefer the [Tensor::shape](Tensor::shape) function,
+    /// which is more high-level and designed for public use.
     fn shape<const D: usize>(tensor: &Self::Primitive<D>) -> Shape<D>;
+
+    /// Reshapes the tensor.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    /// * `shape` - The new shape of the tensor.
+    ///
+    /// # Returns
+    ///
+    /// The reshaped tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For reshaping a tensor, users should prefer the [Tensor::reshape](Tensor::reshape) function,
+    /// which is more high-level and designed for public use.
     fn reshape<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
         shape: Shape<D2>,
     ) -> Self::Primitive<D2>;
-    fn index<const D1: usize, const D2: usize>(
+
+    ///  Select tensor elements corresponding for the given ranges.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    /// * `ranges` - The ranges of the elements to select.
+    ///
+    /// # Returns
+    ///
+    /// The selected elements.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For selecting elements of a tensor, users should prefer the [Tensor::slice](Tensor::slice) function,
+    /// which is more high-level and designed for public use.
+    fn slice<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        range: [Range<usize>; D2],
     ) -> Self::Primitive<D1>;
-    fn index_assign<const D1: usize, const D2: usize>(
+
+    ///  Assigns the given value to the tensor elements corresponding for the given ranges.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    /// * `ranges` - The ranges of the elements to select.
+    /// * `value` - The value to assign.
+    ///
+    /// # Returns
+    ///
+    /// The tensor with the assigned values.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For assigning values to elements of a tensor, users should prefer the [Tensor::slice_assign](Tensor::slice_assign) function,
+    /// which is more high-level and designed for public use.
+    fn slice_assign<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
         value: Self::Primitive<D1>,
     ) -> Self::Primitive<D1>;
+
+    /// Returns the device on which the tensor is allocated.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    ///
+    /// # Returns
+    ///
+    /// The device on which the tensor is allocated.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For getting the device of a tensor, users should prefer the [Tensor::device](Tensor::device) function,
+    /// which is more high-level and designed for public use.
     fn device<const D: usize>(tensor: &Self::Primitive<D>) -> B::Device;
+
+    /// Moves the tensor to the given device.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    /// * `device` - The device on which the tensor will be moved.
+    ///
+    /// # Returns
+    ///
+    /// The tensor on the given device.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For moving a tensor to a device, users should prefer the [Tensor::to_device](Tensor::to_device) function,
+    /// which is more high-level and designed for public use.
     fn to_device<const D: usize>(
         tensor: Self::Primitive<D>,
         device: &B::Device,
     ) -> Self::Primitive<D>;
+
+    /// Extracts the data from the tensor.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    ///
+    /// # Returns
+    ///
+    /// The data of the tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For extracting the data of a tensor, users should prefer the [Tensor::into_data](Tensor::into_data) function,
+    /// which is more high-level and designed for public use.
     fn into_data<const D: usize>(tensor: Self::Primitive<D>) -> Data<Self::Elem, D>;
+
+    /// Creates a tensor from the given data.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The data of the tensor.
+    /// * `device` - The device on which the tensor will be allocated.
+    ///
+    /// # Returns
+    ///
+    /// The tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For creating a tensor from data, users should prefer the [Tensor::from_data](Tensor::from_data) function,
+    /// which is more high-level and designed for public use.
     fn from_data<const D: usize>(
         data: Data<Self::Elem, D>,
         device: &B::Device,
     ) -> Self::Primitive<D>;
+
+    /// Repeat the tensor along the given dimension.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor.
+    /// * `dim` - The dimension along which the tensor will be repeated.
+    /// * `times` - The number of times the tensor will be repeated.
+    ///
+    /// # Returns
+    ///
+    /// The repeated tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For repeating a tensor, users should prefer the [Tensor::repeat](Tensor::repeat) function,
+    /// which is more high-level and designed for public use.
     fn repeat<const D: usize>(
         tensor: Self::Primitive<D>,
         dim: usize,
         times: usize,
     ) -> Self::Primitive<D>;
+
+    /// Concatenates the given tensors along the given dimension.
+    ///
+    /// # Arguments
+    ///
+    /// * `vectors` - The tensors to concatenate.
+    /// * `dim` - The dimension along which the tensors will be concatenated.
+    ///
+    /// # Returns
+    ///
+    /// The concatenated tensor.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For concatenating tensors, users should prefer the [Tensor::cat](Tensor::cat) function,
+    /// which is more high-level and designed for public use.
     fn cat<const D: usize>(vectors: Vec<Self::Primitive<D>>, dim: usize) -> Self::Primitive<D>;
+
+    /// Equates the given tensors.
+    ///
+    /// # Arguments
+    ///
+    /// * `lhs` - The left hand side tensor.
+    /// * `rhs` - The right hand side tensor.
+    ///
+    /// # Returns
+    ///
+    /// The tensor of booleans indicating whether the corresponding elements are equal.
+    ///
+    /// # Remarks
+    ///
+    /// This is a low-level function used internally by the library to call different backend functions
+    /// with static dispatch. It is not designed for direct usage by users, and not recommended to import
+    /// or use this function directly.
+    ///
+    /// For equating tensors, users should prefer the [Tensor::equal](Tensor::equal) function,
+    /// which is more high-level and designed for public use.
     fn equal<const D: usize>(
         lhs: Self::Primitive<D>,
         rhs: Self::Primitive<D>,
     ) -> Tensor<B, D, Bool>;
-    fn equal_elem<const D: usize>(lhs: Self::Primitive<D>, rhs: Self::Elem) -> Tensor<B, D, Bool>;
+
+    /// Returns the name of the element type.
     fn elem_type_name() -> &'static str {
         core::any::type_name::<Self::Elem>()
     }
@@ -423,19 +730,19 @@ impl<B: Backend> BasicOps<B> for Float {
         B::reshape(tensor, shape)
     }
 
-    fn index<const D1: usize, const D2: usize>(
+    fn slice<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
     ) -> Self::Primitive<D1> {
-        B::index(tensor, indexes)
+        B::slice(tensor, ranges)
     }
 
-    fn index_assign<const D1: usize, const D2: usize>(
+    fn slice_assign<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
         value: Self::Primitive<D1>,
     ) -> Self::Primitive<D1> {
-        B::index_assign(tensor, indexes, value)
+        B::slice_assign(tensor, ranges, value)
     }
 
     fn device<const D: usize>(tensor: &Self::Primitive<D>) -> <B as Backend>::Device {
@@ -478,10 +785,6 @@ impl<B: Backend> BasicOps<B> for Float {
     ) -> Tensor<B, D, Bool> {
         Tensor::new(B::equal(lhs, rhs))
     }
-
-    fn equal_elem<const D: usize>(lhs: Self::Primitive<D>, rhs: Self::Elem) -> Tensor<B, D, Bool> {
-        Tensor::new(B::equal_elem(lhs, rhs))
-    }
 }
 
 impl<B: Backend> BasicOps<B> for Int {
@@ -501,19 +804,19 @@ impl<B: Backend> BasicOps<B> for Int {
         B::int_reshape(tensor, shape)
     }
 
-    fn index<const D1: usize, const D2: usize>(
+    fn slice<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
     ) -> Self::Primitive<D1> {
-        B::int_index(tensor, indexes)
+        B::int_slice(tensor, ranges)
     }
 
-    fn index_assign<const D1: usize, const D2: usize>(
+    fn slice_assign<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
         value: Self::Primitive<D1>,
     ) -> Self::Primitive<D1> {
-        B::int_index_assign(tensor, indexes, value)
+        B::int_slice_assign(tensor, ranges, value)
     }
 
     fn device<const D: usize>(tensor: &Self::Primitive<D>) -> <B as Backend>::Device {
@@ -553,10 +856,6 @@ impl<B: Backend> BasicOps<B> for Int {
         Tensor::new(B::int_equal(lhs, rhs))
     }
 
-    fn equal_elem<const D: usize>(lhs: Self::Primitive<D>, rhs: Self::Elem) -> Tensor<B, D, Bool> {
-        Tensor::new(B::int_equal_elem(lhs, rhs))
-    }
-
     fn cat<const D: usize>(vectors: Vec<Self::Primitive<D>>, dim: usize) -> Self::Primitive<D> {
         B::int_cat(vectors, dim)
     }
@@ -579,19 +878,19 @@ impl<B: Backend> BasicOps<B> for Bool {
         B::bool_reshape(tensor, shape)
     }
 
-    fn index<const D1: usize, const D2: usize>(
+    fn slice<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
     ) -> Self::Primitive<D1> {
-        B::bool_index(tensor, indexes)
+        B::bool_slice(tensor, ranges)
     }
 
-    fn index_assign<const D1: usize, const D2: usize>(
+    fn slice_assign<const D1: usize, const D2: usize>(
         tensor: Self::Primitive<D1>,
-        indexes: [Range<usize>; D2],
+        ranges: [Range<usize>; D2],
         value: Self::Primitive<D1>,
     ) -> Self::Primitive<D1> {
-        B::bool_index_assign(tensor, indexes, value)
+        B::bool_slice_assign(tensor, ranges, value)
     }
 
     fn device<const D: usize>(tensor: &Self::Primitive<D>) -> <B as Backend>::Device {
@@ -629,10 +928,6 @@ impl<B: Backend> BasicOps<B> for Bool {
         rhs: Self::Primitive<D>,
     ) -> Tensor<B, D, Bool> {
         Tensor::new(B::bool_equal(lhs, rhs))
-    }
-
-    fn equal_elem<const D: usize>(lhs: Self::Primitive<D>, rhs: Self::Elem) -> Tensor<B, D, Bool> {
-        Tensor::new(B::bool_equal_elem(lhs, rhs))
     }
 
     fn cat<const D: usize>(vectors: Vec<Self::Primitive<D>>, dim: usize) -> Self::Primitive<D> {

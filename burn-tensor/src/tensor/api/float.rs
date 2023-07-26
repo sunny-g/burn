@@ -7,21 +7,12 @@ use crate::check::TensorCheck;
 use crate::tensor::backend::Backend;
 use crate::tensor::stats;
 use crate::tensor::{Data, Distribution, Shape};
-use crate::Int;
 use crate::Tensor;
 
 impl<const D: usize, B> Tensor<B, D>
 where
     B: Backend,
 {
-    pub fn into_primitive(self) -> B::TensorPrimitive<D> {
-        self.primitive
-    }
-
-    pub fn from_primitive(tensor: B::TensorPrimitive<D>) -> Self {
-        Self::new(tensor)
-    }
-
     /// Executes an operation on the tensor and modifies its value.
     ///
     /// # Notes
@@ -151,7 +142,7 @@ where
         let mut ranges: [core::ops::Range<usize>; D] = ranges.try_into().unwrap();
         ranges[D - 1] = index..index + 1;
 
-        tensor.index_assign(ranges, Tensor::ones(Shape::new([1; D])))
+        tensor.slice_assign(ranges, Tensor::ones(Shape::new([1; D])))
     }
 
     /// Applies the transpose operation.
@@ -228,44 +219,6 @@ where
         Self::new(B::from_full_precision(tensor.primitive))
     }
 
-    /// Applies the argmax function along the given dimension and returns an integer tensor.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use burn_tensor::backend::Backend;
-    /// use burn_tensor::{Tensor, Shape};
-    ///
-    /// fn example<B: Backend>() {
-    ///     let tensor = Tensor::<B, 3>::ones(Shape::new([2, 3, 3]));
-    ///     let tensor = tensor.argmax(1);
-    ///     println!("{:?}", tensor.shape());
-    ///     // Shape { dims: [2, 1, 3] }
-    /// }
-    /// ```
-    pub fn argmax(self, dim: usize) -> Tensor<B, D, Int> {
-        Tensor::new(B::argmax(self.primitive, dim))
-    }
-
-    /// Applies the argmin function along the given dimension and returns an integer tensor.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use burn_tensor::backend::Backend;
-    /// use burn_tensor::{Tensor, Shape};
-    ///
-    /// fn example<B: Backend>() {
-    ///     let tensor = Tensor::<B, 3>::ones(Shape::new([2, 3, 3]));
-    ///     let tensor = tensor.argmin(1);
-    ///     println!("{:?}", tensor.shape());
-    ///     // Shape { dims: [2, 1, 3] }
-    /// }
-    /// ```
-    pub fn argmin(self, dim: usize) -> Tensor<B, D, Int> {
-        Tensor::new(B::argmin(self.primitive, dim))
-    }
-
     /// Detach the current tensor from the autodiff graph.
     /// This function does nothing when autodiff is not enabled.
     /// This can be used in batchers or elsewere to ensure that previous operations are not
@@ -300,6 +253,7 @@ where
 }
 
 impl<const D: usize, B: ADBackend> Tensor<B, D> {
+    /// Backward pass of the tensor.
     pub fn backward(&self) -> B::Gradients {
         B::backward::<D>(self.primitive.clone())
     }
@@ -318,10 +272,20 @@ impl<const D: usize, B: ADBackend> Tensor<B, D> {
         B::grad_remove(&self.primitive, grads).map(Tensor::new)
     }
 
+    /// Returns the inner tensor without the autodiff information.
     pub fn inner(self) -> Tensor<B::InnerBackend, D> {
         Tensor::new(B::inner(self.primitive))
     }
 
+    /// Convert a tensor to the autodiff backend.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The tensor to convert.
+    ///
+    /// # Returns
+    ///
+    /// The tensor converted to the autodiff backend.
     pub fn from_inner(inner: Tensor<B::InnerBackend, D>) -> Self {
         Self::new(B::from_inner(inner.primitive))
     }

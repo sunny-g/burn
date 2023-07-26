@@ -35,7 +35,7 @@ macro_rules! module {
         }
         let mut mapper = Mapper {
             capture: $capture,
-            backend: core::marker::PhantomData::default(),
+            backend: core::marker::PhantomData,
         };
         $module.map(&mut mapper)
     }};
@@ -53,7 +53,7 @@ macro_rules! module {
         let mut state = $init();
         let mut visitor = Visitor {
             state: &mut state,
-            backend: core::marker::PhantomData::default(),
+            backend: core::marker::PhantomData,
         };
         $module.visit(&mut visitor);
         state
@@ -64,7 +64,7 @@ macro_rules! module {
 ///
 /// Modules should be created using the [derive](burn_derive::Module) attribute.
 /// This will make your module trainable, savable and loadable via
-/// [state](Module::state) and [load](Module::load).
+/// `state` and `load`.
 ///
 /// # Example
 ///
@@ -107,6 +107,7 @@ pub trait Module<B: Backend>: Clone + Send + Sync + core::fmt::Debug {
             init = Vec::new
         )
     }
+
     /// Fork the module and all of its sub-modules to the given device.
     ///
     /// # Notes
@@ -129,6 +130,7 @@ pub trait Module<B: Backend>: Clone + Send + Sync + core::fmt::Debug {
             capture = { device: B::Device }
         )
     }
+
     /// Move the module and all of its sub-modules to the given device.
     ///
     /// # Warnings
@@ -143,6 +145,7 @@ pub trait Module<B: Backend>: Clone + Send + Sync + core::fmt::Debug {
             capture = { device: B::Device }
         )
     }
+
     /// Each tensor in the module tree will not require grad.
     ///
     /// # Warnings
@@ -170,24 +173,32 @@ pub trait Module<B: Backend>: Clone + Send + Sync + core::fmt::Debug {
     }
     /// Visit each tensor in the module with a [visitor](ModuleVisitor).
     fn visit<V: ModuleVisitor<B>>(&self, visitor: &mut V);
+
     /// Map each tensor in the module with a [mapper](ModuleMapper).
     fn map<M: ModuleMapper<B>>(self, mapper: &mut M) -> Self;
     /// Load the module state from a record.
+
     fn load_record(self, record: Self::Record) -> Self;
+
     /// Convert the module into a record containing the state.
     fn into_record(self) -> Self::Record;
 }
 
+/// Module visitor trait.
 pub trait ModuleVisitor<B: Backend> {
+    /// Visit a tensor in the module.
     fn visit<const D: usize>(&mut self, id: &ParamId, tensor: &Tensor<B, D>);
 }
 
+/// Module mapper trait.
 pub trait ModuleMapper<B: Backend> {
+    /// Map a tensor in the module.
     fn map<const D: usize>(&mut self, id: &ParamId, tensor: Tensor<B, D>) -> Tensor<B, D>;
 }
 
 /// Module with auto-differentiation backend.
 pub trait ADModule<B: ADBackend>: Module<B> + Send + Sync + core::fmt::Debug {
+    /// Inner module without auto-differentiation.
     type InnerModule: Module<B::InnerBackend>;
 
     /// Get the same module, but on the inner backend without auto-differentiation.

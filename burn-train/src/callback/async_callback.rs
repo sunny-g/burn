@@ -12,6 +12,7 @@ enum Message<T, V> {
     End,
 }
 
+/// Async trainer callback tracker.
 pub struct AsyncTrainerCallback<T, V> {
     sender: mpsc::Sender<Message<T, V>>,
     handler: Option<JoinHandle<()>>,
@@ -52,6 +53,7 @@ impl<T, V> CallbackThread<T, V> {
 }
 
 impl<T: Send + Sync + 'static, V: Send + Sync + 'static> AsyncTrainerCallback<T, V> {
+    /// Create a new async trainer callback.
     pub fn new(callback: Box<dyn LearnerCallback<T, V>>) -> Self {
         let (sender, receiver) = mpsc::channel();
         let thread = CallbackThread::new(Mutex::new(callback), receiver);
@@ -84,7 +86,7 @@ impl<T: Send, V: Send> LearnerCallback<T, V> for AsyncTrainerCallback<T, V> {
 impl<T, V> Drop for AsyncTrainerCallback<T, V> {
     fn drop(&mut self) {
         self.sender.send(Message::End).unwrap();
-        let handler = std::mem::replace(&mut self.handler, None);
+        let handler = self.handler.take();
 
         if let Some(handler) = handler {
             handler.join().unwrap();

@@ -14,7 +14,7 @@ impl<B: Backend> CrossEntropyLoss<B> {
     pub fn new(pad_index: Option<usize>) -> Self {
         Self {
             pad_index,
-            backend: PhantomData::default(),
+            backend: PhantomData,
         }
     }
 
@@ -22,14 +22,14 @@ impl<B: Backend> CrossEntropyLoss<B> {
     ///
     /// # Shapes
     ///
-    /// - logits: [batch_size, num_targets]
-    /// - targets: [batch_size]
+    /// - logits: `[batch_size, num_targets]`
+    /// - targets: `[batch_size]`
     pub fn forward(&self, logits: Tensor<B, 2>, targets: Tensor<B, 1, Int>) -> Tensor<B, 1> {
         let [batch_size] = targets.dims();
 
         let mask = self.padding_mask(&targets);
         let tensor = activation::log_softmax(logits, 1);
-        let tensor = tensor.index_select(targets.reshape([batch_size, 1]));
+        let tensor = tensor.gather(1, targets.reshape([batch_size, 1]));
         let tensor = self.apply_mask(tensor.reshape([batch_size]), mask);
 
         tensor.mean().neg()
@@ -91,8 +91,9 @@ mod tests {
             [batch_size, num_targets],
             Distribution::Normal(0., 1.0),
         );
-        let targets =
-            Tensor::<TestBackend, 1, Int>::from_data(Data::from([2, 0, 4, pad_index as i64]));
+        let targets = Tensor::<TestBackend, 1, Int>::from_data(
+            Data::<i64, 1>::from([2, 0, 4, pad_index as i64]).convert(),
+        );
         let targets_logits = Tensor::<TestBackend, 2>::from_data(Data::from([
             [0.0, 0.0, 1.0, 0.0, 0.0],
             [1.0, 0.0, 0.0, 0.0, 0.0],

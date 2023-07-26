@@ -4,16 +4,15 @@ use crate::config::Config;
 use crate::module::Module;
 use crate::module::Param;
 use crate::nn::Initializer;
+use crate::nn::PaddingConfig2d;
 use crate::tensor::backend::Backend;
 use crate::tensor::Tensor;
 use burn_tensor::module::conv2d;
-use burn_tensor::ops::conv::calculate_conv_padding;
 use burn_tensor::ops::ConvOptions;
-
 use libm::sqrt;
 
 /// Configuration to create an [2D convolution](Conv2d) layer.
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct Conv2dConfig {
     /// The number of channels.
     pub channels: [usize; 2],
@@ -29,36 +28,24 @@ pub struct Conv2dConfig {
     #[config(default = "1")]
     pub groups: usize,
     /// The padding configuration.
-    #[config(default = "Conv2dPaddingConfig::Valid")]
-    pub padding: Conv2dPaddingConfig,
+    #[config(default = "PaddingConfig2d::Valid")]
+    pub padding: PaddingConfig2d,
     /// If bias should be added to the output.
     #[config(default = true)]
     pub bias: bool,
     /// The type of function used to initialize neural network parameters
-    #[config(default = "Initializer::UniformDefault")]
+    #[config(default = "Initializer::KaimingUniform{gain:1.0/sqrt(3.0),fan_out_only:false}")]
     pub initializer: Initializer,
-}
-
-/// Padding configuration for 2D convolution [config](Conv2dConfig).
-#[derive(Module, Config, Debug)]
-pub enum Conv2dPaddingConfig {
-    /// Dynamicaly calculate the amount of padding necessary to ensure that the output size will be
-    /// the same as the input.
-    Same,
-    /// Same as no padding.
-    Valid,
-    /// Applies the specified amount of padding to all inputs.
-    Explicit(usize, usize),
 }
 
 /// Applies a 2D convolution over input tensors.
 ///
 /// # Params
 ///
-/// - weight: Tensor of shape [channels_out, channels_in, kernel_size_1, kernel_size_2] initialized from a uniform
+/// - weight: Tensor of shape `[channels_out, channels_in, kernel_size_1, kernel_size_2]` initialized from a uniform
 ///     distribution `U(-k, k)` where `k = sqrt(1 / channels_in * kernel_size_1 * kernel_size_2)`
 ///
-/// - bias:   Tensor of shape [channels_out], initialized from a uniform distribution `U(-k, k)`
+/// - bias:   Tensor of shape `[channels_out]`, initialized from a uniform distribution `U(-k, k)`
 ///     where `k = sqrt(1 / channels_in * kernel_size_1 * kernel_size_2)`
 #[derive(Module, Debug)]
 pub struct Conv2d<B: Backend> {
@@ -68,30 +55,25 @@ pub struct Conv2d<B: Backend> {
     kernel_size: [usize; 2],
     dilation: [usize; 2],
     groups: usize,
-    padding: Conv2dPaddingConfig,
+    padding: PaddingConfig2d,
 }
 
 impl Conv2dConfig {
     /// Initialize a new [conv2d](Conv2d) module.
     pub fn init<B: Backend>(&self) -> Conv2d<B> {
-        let k = (self.channels[0] * self.kernel_size[0] * self.kernel_size[1]) as f64;
-        let k = sqrt(1.0 / k);
-
-        let initializer = if let Initializer::UniformDefault = self.initializer {
-            Initializer::Uniform(-k, k)
-        } else {
-            self.initializer.clone()
-        };
-
-        let weight = initializer.init([
+        let shape = [
             self.channels[1],
             self.channels[0],
             self.kernel_size[0],
             self.kernel_size[1],
-        ]);
-
+        ];
+        let fan_in = self.channels[0] * self.kernel_size.iter().product::<usize>();
+        let weight = self.initializer.init_with(shape, Some(fan_in), None);
         let bias = if self.bias {
-            Some(initializer.init([self.channels[1]]))
+            Some(
+                self.initializer
+                    .init_with([self.channels[1]], Some(fan_in), None),
+            )
         } else {
             None
         };
@@ -142,35 +124,13 @@ impl<B: Backend> Conv2d<B> {
     }
 }
 
-impl Conv2dPaddingConfig {
-    pub(crate) fn calculate_padding_2d(
-        &self,
-        height: usize,
-        width: usize,
-        kernel_size: &[usize; 2],
-        stride: &[usize; 2],
-    ) -> [usize; 2] {
-        let same_padding = || {
-            let p1 = calculate_conv_padding(kernel_size[0], stride[0], height, height);
-            let p2 = calculate_conv_padding(kernel_size[1], stride[1], width, width);
-
-            [p1, p2]
-        };
-
-        match self {
-            Conv2dPaddingConfig::Same => same_padding(),
-            Conv2dPaddingConfig::Valid => [0, 0],
-            Conv2dPaddingConfig::Explicit(v1, v2) => [*v1, *v2],
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use burn_tensor::Data;
 
     use super::*;
     use crate::TestBackend;
+    use libm::sqrt;
 
     #[test]
     fn initializer_default() {
@@ -181,8 +141,14 @@ mod tests {
         let k = sqrt(1.0 / k) as f32;
         let conv = config.init::<TestBackend>();
 
-        assert_eq!(config.initializer, Initializer::UniformDefault);
-        conv.weight.to_data().assert_in_range(-k, k);
+        assert_eq!(
+            config.initializer,
+            Initializer::KaimingUniform {
+                gain: 1.0 / sqrt(3.0),
+                fan_out_only: false
+            }
+        );
+        conv.weight.to_data().assert_within_range(-k..k);
     }
 
     #[test]

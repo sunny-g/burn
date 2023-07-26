@@ -23,7 +23,7 @@ impl<M> GradientsAccumulator<M> {
     pub fn new() -> Self {
         Self {
             grads: GradientsParams::new(),
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 }
@@ -115,6 +115,6 @@ mod tests {
     }
 
     fn random_tensor() -> Tensor<TestADBackend, 2> {
-        Tensor::<TestADBackend, 2>::random([2, 20], Distribution::Standard)
+        Tensor::<TestADBackend, 2>::random([2, 20], Distribution::Default)
     }
 }

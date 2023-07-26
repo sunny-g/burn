@@ -9,10 +9,9 @@ use crate::AsyncTrainerCallback;
 use burn_core::lr_scheduler::LRScheduler;
 use burn_core::module::ADModule;
 use burn_core::optim::Optimizer;
-use burn_core::record::{FileRecorder, Record, RecordSettings};
+use burn_core::record::FileRecorder;
 use burn_core::tensor::backend::ADBackend;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+
 use std::sync::Arc;
 
 /// Struct to configure and create a [learner](Learner).
@@ -45,6 +44,11 @@ where
     Optim: Optimizer<Model, B>,
     LR: LRScheduler,
 {
+    /// Creates a new learner builder.
+    ///
+    /// # Arguments
+    ///
+    /// * `directory` - The directory to save the checkpoints.
     pub fn new(directory: &str) -> Self {
         let renderer = Box::new(CLIDashboardRenderer::new());
         let logger_train = Box::new(FileMetricLogger::new(format!("{directory}/train").as_str()));
@@ -145,30 +149,30 @@ where
         self
     }
 
-    /// Register a checkpointer that will save the [optimizer](crate::optim::Optimizer) and the
-    /// [model](crate::module::Module) [states](crate::module::State).
+    /// Register a checkpointer that will save the [optimizer](Optimizer) and the
+    /// [model](ADModule).
     ///
     /// The number of checkpoints to be keep should be set to a minimum of two to be safe, since
     /// they are saved and deleted asynchronously and a crash during training might make a
     /// checkpoint non-usable.
-    pub fn with_file_checkpointer<S>(mut self, num_keep: usize) -> Self
+    pub fn with_file_checkpointer<FR>(mut self, num_keep: usize, recorder: FR) -> Self
     where
-        S: RecordSettings + 'static,
-        <Model::Record as Record>::Item<S>: Serialize + DeserializeOwned,
-        <Optim::Record as Record>::Item<S>: Serialize + DeserializeOwned,
-        S::Recorder: FileRecorder,
+        FR: FileRecorder + 'static,
     {
-        self.checkpointer_model = Some(Arc::new(FileCheckpointer::<S>::new(
+        self.checkpointer_model = Some(Arc::new(FileCheckpointer::new(
+            recorder.clone(),
             format!("{}/checkpoint", self.directory).as_str(),
             "model",
             num_keep,
         )));
-        self.checkpointer_optimizer = Some(Arc::new(FileCheckpointer::<S>::new(
+        self.checkpointer_optimizer = Some(Arc::new(FileCheckpointer::new(
+            recorder.clone(),
             format!("{}/checkpoint", self.directory).as_str(),
             "optim",
             num_keep,
         )));
-        self.checkpointer_scheduler = Some(Arc::new(FileCheckpointer::<S>::new(
+        self.checkpointer_scheduler = Some(Arc::new(FileCheckpointer::new(
+            recorder,
             format!("{}/checkpoint", self.directory).as_str(),
             "scheduler",
             num_keep,

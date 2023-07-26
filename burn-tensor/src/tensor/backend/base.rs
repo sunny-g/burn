@@ -54,6 +54,7 @@ pub trait Backend:
     + BoolTensorOps<Self>
     + IntTensorOps<Self>
     + ModuleOps<Self>
+    + ActivationOps<Self>
     + Clone
     + Sized
     + Default
@@ -78,7 +79,7 @@ pub trait Backend:
     /// Tensor primitive to be used for all int operations.
     type IntTensorPrimitive<const D: usize>: Clone + Send + Sync + 'static + core::fmt::Debug;
     /// Int element type.
-    type IntElem: Element + From<i64> + Into<i64>;
+    type IntElem: Element;
 
     /// Tensor primitive to be used for all bool operations.
     type BoolTensorPrimitive<const D: usize>: Clone + Send + Sync + 'static + core::fmt::Debug;
@@ -100,21 +101,75 @@ pub(crate) type ADBackendTensorPrimitive<const D: usize, B> =
 
 /// Trait that allows a backend to support autodiff.
 pub trait ADBackend: Backend {
+    /// The inner backend type.
     type InnerBackend: Backend<Device = Self::Device, FloatElem = Self::FloatElem>;
+
+    /// Gradients type.
     type Gradients: Send + Sync;
 
+    /// Backward pass.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor is the last node of computational graph where the gradients are computed.
+    ///
+    /// # Returns
+    ///
+    /// The gradients.
     fn backward<const D: usize>(tensor: Self::TensorPrimitive<D>) -> Self::Gradients;
+
+    /// Returns the gradients of a tensor.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor to extract the gradients from.
+    ///
+    /// # Returns
+    ///
+    /// An optional tensor containing the gradient.
     fn grad<const D: usize>(
         tensor: &Self::TensorPrimitive<D>,
         grads: &Self::Gradients,
     ) -> Option<ADBackendTensorPrimitive<D, Self>>;
+
+    /// Pops the gradients of a tensor and returns them.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor to pop the gradients from.
+    /// * `grads` - The gradients.
+    ///
+    /// # Returns
+    ///
+    /// An optional tensor containing the given gradients.
     fn grad_remove<const D: usize>(
         tensor: &Self::TensorPrimitive<D>,
         grads: &mut Self::Gradients,
     ) -> Option<ADBackendTensorPrimitive<D, Self>>;
+
+    /// Returns the tensor with inner backend type.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The tensor to get the inner backend tensor for.
+    ///
+    /// # Returns
+    ///
+    /// The inner backend tensor.
     fn inner<const D: usize>(
         tensor: Self::TensorPrimitive<D>,
     ) -> <Self::InnerBackend as Backend>::TensorPrimitive<D>;
+
+    /// Converts the inner backend tensor to the autodiff backend tensor.
+    ///
+    /// # Arguments
+    ///
+    /// * `tensor` - The inner backend tensor to convert.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// The autodiff backend tensor.
     fn from_inner<const D: usize>(
         tensor: <Self::InnerBackend as Backend>::TensorPrimitive<D>,
     ) -> Self::TensorPrimitive<D>;

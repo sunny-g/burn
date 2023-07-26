@@ -1,4 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![warn(missing_docs)]
+
+//! Burn ndarray backend.
 
 #[macro_use]
 extern crate derive_new;
@@ -29,6 +32,7 @@ mod tests {
     type TestTensor<const D: usize> = burn_tensor::Tensor<TestBackend, D>;
     type TestTensorInt<const D: usize> = burn_tensor::Tensor<TestBackend, D, burn_tensor::Int>;
     use alloc::format;
+    use alloc::vec;
 
     burn_tensor::testgen_all!();
 

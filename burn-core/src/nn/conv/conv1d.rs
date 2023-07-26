@@ -3,13 +3,11 @@ use crate as burn;
 use crate::config::Config;
 use crate::module::Module;
 use crate::module::Param;
-use crate::nn::Initializer;
+use crate::nn::{Initializer, PaddingConfig1d};
 use crate::tensor::backend::Backend;
 use crate::tensor::Tensor;
 use burn_tensor::module::conv1d;
-use burn_tensor::ops::conv::calculate_conv_padding;
 use burn_tensor::ops::ConvOptions;
-
 use libm::sqrt;
 
 /// Configuration to create an [1D convolution](Conv1d) layer.
@@ -31,26 +29,14 @@ pub struct Conv1dConfig {
     #[config(default = "1")]
     pub groups: usize,
     /// The padding configuration.
-    #[config(default = "Conv1dPaddingConfig::Valid")]
-    pub padding: Conv1dPaddingConfig,
+    #[config(default = "PaddingConfig1d::Valid")]
+    pub padding: PaddingConfig1d,
     /// If bias should be added to the output.
     #[config(default = true)]
     pub bias: bool,
     /// The type of function used to initialize neural network parameters
-    #[config(default = "Initializer::UniformDefault")]
+    #[config(default = "Initializer::KaimingUniform{gain:1.0/sqrt(3.0),fan_out_only:false}")]
     pub initializer: Initializer,
-}
-
-/// Padding configuration for 1D convolution [config](Conv1dConfig).
-#[derive(Module, Config, Debug)]
-pub enum Conv1dPaddingConfig {
-    /// Dynamicaly calculate the amount of padding necessary to ensure that the output size will be
-    /// the same as the input.
-    Same,
-    /// Same as no padding.
-    Valid,
-    /// Applies the specified amount of padding to all inputs.
-    Explicit(usize),
 }
 
 /// Applies a 1D convolution over input tensors.
@@ -60,7 +46,7 @@ pub enum Conv1dPaddingConfig {
 /// - weight: Tensor of shape [channels_out, channels_in, kernel_size] initialized from a uniform
 ///     distribution `U(-k, k)` where `k = sqrt(1 / channels_in * kernel_size)`
 ///
-/// - bias:   Tensor of shape [channels_out], initialized from a uniform distribution `U(-k, k)`
+/// - bias:   Tensor of shape `[channels_out]`, initialized from a uniform distribution `U(-k, k)`
 ///     where `k = sqrt(1 / channels_in * kernel_size)`
 #[derive(Module, Debug)]
 pub struct Conv1d<B: Backend> {
@@ -70,33 +56,28 @@ pub struct Conv1d<B: Backend> {
     kernel_size: usize,
     dilation: usize,
     groups: usize,
-    padding: Conv1dPaddingConfig,
+    padding: PaddingConfig1d,
 }
 
 impl Conv1dConfig {
     /// Initialize a new [conv1d](Conv1d) module.
     pub fn init<B: Backend>(&self) -> Conv1d<B> {
-        let k = (self.channels_in * self.kernel_size) as f64;
-        let k = sqrt(1.0 / k);
-
-        let initializer = if let Initializer::UniformDefault = self.initializer {
-            Initializer::Uniform(-k, k)
-        } else {
-            self.initializer.clone()
-        };
-
-        let weight = initializer.init([self.channels_out, self.channels_in, self.kernel_size]);
-
+        let shape = [self.channels_out, self.channels_in, self.kernel_size];
+        let fan_in: usize = self.channels_in * self.kernel_size;
+        let weight = self.initializer.init_with(shape, Some(fan_in), None);
         let bias = if self.bias {
-            Some(Param::from(initializer.init([self.channels_out])))
+            Some(
+                self.initializer
+                    .init_with([self.channels_out], Some(fan_in), None),
+            )
         } else {
             None
         };
 
         Conv1d {
             weight: Param::from(weight),
-            bias,
-            stride: 1, // TODO: Add the stride to the config when properly supported.
+            bias: bias.map(Param::from),
+            stride: self.stride,
             kernel_size: self.kernel_size,
             padding: self.padding.clone(),
             dilation: self.dilation,
@@ -108,7 +89,7 @@ impl Conv1dConfig {
         Conv1d {
             weight: record.weight,
             bias: record.bias,
-            stride: 1, // TODO: Add the stride to the config when properly supported.
+            stride: self.stride,
             kernel_size: self.kernel_size,
             padding: self.padding.clone(),
             dilation: self.dilation,
@@ -125,16 +106,10 @@ impl<B: Backend> Conv1d<B> {
     /// - input: [batch_size, channels_in, length_in],
     /// - output: [batch_size, channels_out, length_out],
     pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 3> {
-        let same_padding = || {
-            let [_batch_size, _channels_in, length] = input.dims();
-            calculate_conv_padding(self.kernel_size, self.stride, length, length)
-        };
-
-        let padding = match &self.padding {
-            Conv1dPaddingConfig::Valid => 0,
-            Conv1dPaddingConfig::Same => same_padding(),
-            Conv1dPaddingConfig::Explicit(value) => *value,
-        };
+        let [_batch_size, _channels, length] = input.dims();
+        let padding = self
+            .padding
+            .calculate_padding_1d(length, self.kernel_size, self.stride);
 
         conv1d(
             input,
@@ -148,6 +123,7 @@ impl<B: Backend> Conv1d<B> {
 #[cfg(test)]
 mod tests {
     use burn_tensor::Data;
+    use libm::sqrt;
 
     use super::*;
     use crate::TestBackend;
@@ -161,8 +137,14 @@ mod tests {
         let k = sqrt(1.0 / k) as f32;
         let conv = config.init::<TestBackend>();
 
-        assert_eq!(config.initializer, Initializer::UniformDefault);
-        conv.weight.to_data().assert_in_range(-k, k);
+        assert_eq!(
+            config.initializer,
+            Initializer::KaimingUniform {
+                gain: 1.0 / sqrt(3.0),
+                fan_out_only: false
+            }
+        );
+        conv.weight.to_data().assert_within_range(-k..k);
     }
 
     #[test]
@@ -176,5 +158,26 @@ mod tests {
         conv.weight
             .to_data()
             .assert_approx_eq(&Data::zeros(conv.weight.shape()), 3);
+    }
+
+    #[test]
+    fn configured_custom() {
+        let config = Conv1dConfig::new(2, 2, 2)
+            .with_padding(PaddingConfig1d::Explicit(2))
+            .with_stride(2)
+            .with_bias(false)
+            .with_dilation(2)
+            .with_groups(2)
+            .with_initializer(Initializer::Zeros);
+
+        let conv = config.init::<TestBackend>();
+
+        assert_eq!(conv.padding, PaddingConfig1d::Explicit(2));
+        assert_eq!(conv.stride, 2);
+        assert!(conv.bias.is_none());
+        assert_eq!(conv.dilation, 2);
+        assert_eq!(conv.groups, 2);
+        assert_eq!(conv.weight.shape().dims, [2, 2, 2]);
+        assert_eq!(conv.weight.to_data(), Data::zeros([2, 2, 2]));
     }
 }

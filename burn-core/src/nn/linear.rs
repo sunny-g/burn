@@ -4,13 +4,12 @@ use crate::config::Config;
 use crate::module::Module;
 use crate::module::Param;
 use crate::tensor::{backend::Backend, Tensor};
-
 use libm::sqrt;
 
 use super::Initializer;
 
 /// Configuration to create a [Linear](Linear) layer.
-#[derive(Config)]
+#[derive(Config, Debug)]
 pub struct LinearConfig {
     /// The size of the input features.
     pub d_input: usize,
@@ -20,7 +19,7 @@ pub struct LinearConfig {
     #[config(default = true)]
     pub bias: bool,
     /// The type of function used to initialize neural network parameters
-    #[config(default = "Initializer::UniformDefault")]
+    #[config(default = "Initializer::KaimingUniform{gain:1.0/sqrt(3.0), fan_out_only:false}")]
     pub initializer: Initializer,
 }
 
@@ -37,25 +36,23 @@ pub struct LinearConfig {
 ///     `U(-k, k)`, where `k = sqrt(1 / d_input)`
 #[derive(Module, Debug)]
 pub struct Linear<B: Backend> {
-    weight: Param<Tensor<B, 2>>,
-    bias: Option<Param<Tensor<B, 1>>>,
+    pub(crate) weight: Param<Tensor<B, 2>>,
+    pub(crate) bias: Option<Param<Tensor<B, 1>>>,
 }
 
 impl LinearConfig {
     /// Initialize a new [linear](Linear) module.
     pub fn init<B: Backend>(&self) -> Linear<B> {
-        let k = sqrt(1.0 / self.d_input as f64);
-
-        let initializer = if let Initializer::UniformDefault = self.initializer {
-            Initializer::Uniform(-k, k)
-        } else {
-            self.initializer.clone()
-        };
-
-        let weight = initializer.init([self.d_input, self.d_output]);
-
+        let shape = [self.d_input, self.d_output];
+        let weight = self
+            .initializer
+            .init_with(shape, Some(self.d_input), Some(self.d_output));
         let bias = if self.bias {
-            Some(initializer.init([self.d_output]))
+            Some(self.initializer.init_with(
+                [self.d_output],
+                Some(self.d_input),
+                Some(self.d_output),
+            ))
         } else {
             None
         };
@@ -96,7 +93,8 @@ impl<B: Backend> Linear<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
-    use burn_tensor::Data;
+    use burn_tensor::{Data, Shape};
+    use libm::sqrt;
 
     #[test]
     fn initializer_default() {
@@ -106,8 +104,14 @@ mod tests {
         let k = sqrt(1.0 / config.d_input as f64) as f32;
         let linear = config.init::<TestBackend>();
 
-        assert_eq!(config.initializer, Initializer::UniformDefault);
-        linear.weight.to_data().assert_in_range(-k, k);
+        assert_eq!(
+            config.initializer,
+            Initializer::KaimingUniform {
+                gain: 1.0 / sqrt(3.0),
+                fan_out_only: false
+            }
+        );
+        linear.weight.to_data().assert_within_range(-k..k);
     }
 
     #[test]
@@ -122,5 +126,37 @@ mod tests {
             .weight
             .to_data()
             .assert_approx_eq(&Data::zeros(linear.weight.shape()), 3);
+    }
+
+    #[test]
+    fn test_linear_forward_no_bias() {
+        TestBackend::seed(0);
+
+        let value = 2.;
+        let config = LinearConfig::new(2, 3)
+            .with_initializer(Initializer::Constant { value })
+            .with_bias(false);
+        let linear = config.init();
+
+        let input = Tensor::<TestBackend, 2>::ones(Shape::new([1, 2]));
+        let result = linear.forward(input);
+        let expected_result = Tensor::<TestBackend, 2>::from_data([[4., 4., 4.]]);
+
+        assert_eq!(result.into_data(), expected_result.into_data());
+    }
+
+    #[test]
+    fn test_linear_forward_with_bias() {
+        TestBackend::seed(0);
+
+        let value = 2.;
+        let config = LinearConfig::new(2, 3).with_initializer(Initializer::Constant { value });
+        let linear = config.init();
+
+        let input = Tensor::<TestBackend, 2>::ones(Shape::new([1, 2]));
+        let result = linear.forward(input);
+        let expected_result = Tensor::<TestBackend, 2>::from_data([[6., 6., 6.]]);
+
+        assert_eq!(result.into_data(), expected_result.into_data());
     }
 }
