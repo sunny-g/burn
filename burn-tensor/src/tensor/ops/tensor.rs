@@ -749,6 +749,12 @@ pub trait TensorOps<B: Backend> {
     /// A tensor with the sum of all elements in `tensor` along `dim`.
     fn sum_dim<const D: usize>(tensor: B::TensorPrimitive<D>, dim: usize) -> B::TensorPrimitive<D>;
 
+    ///
+    fn maximum<const D: usize>(
+        lhs: B::TensorPrimitive<D>,
+        rhs: B::TensorPrimitive<D>,
+    ) -> B::TensorPrimitive<D>;
+
     /// Mean of all elements in a tensor.
     ///
     /// # Arguments

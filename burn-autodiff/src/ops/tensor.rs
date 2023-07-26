@@ -846,6 +846,10 @@ impl<B: Backend> TensorOps<ADBackendDecorator<B>> for ADBackendDecorator<B> {
         matches!(tensor.node.requirement, Requirement::Grad)
     }
 
+    fn maximum<const D: usize>(lhs: ADTensor<B, D>, rhs: ADTensor<B, D>) -> ADTensor<B, D> {
+        todo!()
+    }
+
     fn mean<const D: usize>(tensor: ADTensor<B, D>) -> ADTensor<B, 1> {
         #[derive(Debug)]
         struct Mean<const D: usize>;

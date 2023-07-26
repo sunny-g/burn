@@ -111,6 +111,12 @@ where
         Self::new(K::ones(shape.into(), device))
     }
 
+    ///
+    pub fn maximum(self, other: Self) -> Self {
+        check!(TensorCheck::binary_ops_ew("Maximum", &self, &other));
+        Self::new(K::maximum(self.primitive, other.primitive))
+    }
+
     /// Create a tensor of the given shape where each element is equal to the provided value.
     pub fn full<S: Into<Shape<D>>, E: ElementConversion>(shape: S, fill_value: E) -> Self {
         Self::full_device(shape, fill_value, &B::Device::default())
@@ -719,6 +725,12 @@ where
     /// For summing all the elements of a tensor along a dimension, users should prefer the [Tensor::sum_dim](Tensor::sum_dim) function,
     /// which is more high-level and designed for public use.
     fn sum_dim<const D: usize>(tensor: Self::Primitive<D>, dim: usize) -> Self::Primitive<D>;
+
+    ///
+    fn maximum<const D: usize>(
+        lhs: Self::Primitive<D>,
+        rhs: Self::Primitive<D>,
+    ) -> Self::Primitive<D>;
 
     /// Computes the mean of all the elements of the tensor.
     ///
@@ -1409,6 +1421,13 @@ impl<B: Backend> Numeric<B> for Int {
     fn sum_dim<const D: usize>(tensor: Self::Primitive<D>, dim: usize) -> Self::Primitive<D> {
         B::int_sum_dim(tensor, dim)
     }
+    fn maximum<const D: usize>(
+        lhs: Self::Primitive<D>,
+        rhs: Self::Primitive<D>,
+    ) -> Self::Primitive<D> {
+        // Tensor::new(B::int_maximum(lhs, rhs))
+        todo!()
+    }
     fn mean<const D: usize>(tensor: Self::Primitive<D>) -> Self::Primitive<1> {
         B::int_mean(tensor)
     }
@@ -1636,6 +1655,13 @@ impl<B: Backend> Numeric<B> for Float {
     }
     fn sum_dim<const D: usize>(tensor: Self::Primitive<D>, dim: usize) -> Self::Primitive<D> {
         B::sum_dim(tensor, dim)
+    }
+    fn maximum<const D: usize>(
+        lhs: Self::Primitive<D>,
+        rhs: Self::Primitive<D>,
+    ) -> Self::Primitive<D> {
+        // Tensor::new(B::max(lhs, rhs))
+        todo!()
     }
     fn mean<const D: usize>(tensor: Self::Primitive<D>) -> Self::Primitive<1> {
         B::mean(tensor)

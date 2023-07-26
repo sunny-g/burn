@@ -302,6 +302,15 @@ impl<E: FloatNdArrayElement> TensorOps<NdArrayBackend<E>> for NdArrayBackend<E> 
         tensor
     }
 
+    fn maximum<const D: usize>(
+        lhs: NdArrayTensor<E, D>,
+        rhs: NdArrayTensor<E, D>,
+    ) -> NdArrayTensor<E, D> {
+        // let array = lhs.array(rhs.array).mapv(|(a, b)| a.max(b));
+        // NdArrayTensor::new(array)
+        todo!()
+    }
+
     fn mean<const D: usize>(tensor: NdArrayTensor<E, D>) -> NdArrayTensor<E, 1> {
         NdArrayMathOps::mean(tensor)
     }
