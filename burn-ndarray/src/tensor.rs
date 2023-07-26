@@ -4,7 +4,7 @@ use ndarray::{ArcArray, Array, Dim, IxDyn};
 
 #[derive(new, Debug, Clone)]
 pub struct NdArrayTensor<E, const D: usize> {
-    pub array: ArcArray<E, IxDyn>,
+    pub(crate) array: ArcArray<E, IxDyn>,
 }
 
 impl<E, const D: usize> NdArrayTensor<E, D> {

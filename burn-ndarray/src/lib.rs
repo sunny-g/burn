@@ -19,7 +19,7 @@ mod tensor;
 
 pub use backend::*;
 pub(crate) use sharing::*;
-pub(crate) use tensor::*;
+pub use tensor::*;
 
 extern crate alloc;
 

@@ -418,6 +418,13 @@ impl<B: Backend> Numeric<B> for Int {
     fn sum_dim<const D: usize>(tensor: Self::Primitive<D>, dim: usize) -> Self::Primitive<D> {
         B::int_sum_dim(tensor, dim)
     }
+    fn maximum<const D: usize>(
+        lhs: Self::Primitive<D>,
+        rhs: Self::Primitive<D>,
+    ) -> Self::Primitive<D> {
+        // Tensor::new(B::int_maximum(lhs, rhs))
+        todo!()
+    }
     fn mean<const D: usize>(tensor: Self::Primitive<D>) -> Self::Primitive<1> {
         B::int_mean(tensor)
     }
@@ -589,6 +596,13 @@ impl<B: Backend> Numeric<B> for Float {
     }
     fn sum_dim<const D: usize>(tensor: Self::Primitive<D>, dim: usize) -> Self::Primitive<D> {
         B::sum_dim(tensor, dim)
+    }
+    fn maximum<const D: usize>(
+        lhs: Self::Primitive<D>,
+        rhs: Self::Primitive<D>,
+    ) -> Self::Primitive<D> {
+        // Tensor::new(B::max(lhs, rhs))
+        todo!()
     }
     fn mean<const D: usize>(tensor: Self::Primitive<D>) -> Self::Primitive<1> {
         B::mean(tensor)
